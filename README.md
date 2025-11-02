@@ -2,9 +2,9 @@
 
 A standalone Python/Streamlit application for managing large CSV and Pickle file datasets with SQLite backend.
 
-**Version**: 1.1.0
+**Version**: 1.0.0
 
-> 📌 **Note**: v1.0.0 is the base level application. Current version: 1.1.0 with Enrichment Suite and DataFrame View features. See [Versioning Guide](docs/VERSIONING.md) for details.
+> 📌 **Note**: CSV Wrangler v1.0.0 - Initial release. See [Versioning Guide](docs/VERSIONING.md) for details.
 
 ## Features
 

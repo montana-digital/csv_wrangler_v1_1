@@ -7,8 +7,8 @@ Version format: MAJOR.MINOR.PATCH
 - MINOR: New features, backward compatible
 - PATCH: Bug fixes, backward compatible
 """
-__version__ = "1.6.0"
-__version_info__ = (1, 6, 0)
+__version__ = "1.0.0"
+__version_info__ = (1, 0, 0)
 
 # Version history
 VERSION_HISTORY = {
