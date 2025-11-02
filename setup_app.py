@@ -12,6 +12,7 @@ This script:
 
 Usage:
     python setup_app.py [--skip-env] [--skip-checks] [--skip-deps] [--force]
+                        [--run-tests] [--launch-app] [--python PATH] [--no-verbose]
 """
 
 import argparse
@@ -466,8 +467,14 @@ def setup_virtual_environment(force: bool = False,
     return True, venv_python
 
 
-def install_dependencies(python_exe: Path) -> bool:
-    """Install project dependencies."""
+def install_dependencies(python_exe: Path, verbose: bool = True) -> bool:
+    """
+    Install project dependencies with verbose output.
+    
+    Args:
+        python_exe: Path to Python executable
+        verbose: Show detailed installation progress
+    """
     print_header("Installing Dependencies")
     
     if not python_exe.exists():
@@ -479,60 +486,153 @@ def install_dependencies(python_exe: Path) -> bool:
         print_error("requirements.txt not found")
         return False
     
+    # Show what packages will be installed
+    print_info("Reading requirements from requirements.txt...")
+    try:
+        req_content = requirements_file.read_text()
+        # Extract package names (lines that aren't comments)
+        packages = []
+        for line in req_content.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                # Extract package name (before version specifiers)
+                pkg_name = line.split(">=")[0].split("==")[0].split("~=")[0].strip()
+                if pkg_name:
+                    packages.append(pkg_name)
+        
+        if packages:
+            print_info(f"Will install {len(packages)} packages: {', '.join(packages[:5])}")
+            if len(packages) > 5:
+                print_info(f"  ... and {len(packages) - 5} more packages")
+    except Exception as e:
+        print_warning(f"Could not parse requirements file: {e}")
+    
     # Upgrade pip first
-    print("Upgrading pip...")
-    exit_code, output = run_command(
-        [str(python_exe), "-m", "pip", "install", "--upgrade", "pip"],
-        capture_output=True,
-        check=False
-    )
+    print("\n" + "=" * 60)
+    print("Step 1: Upgrading pip to latest version...")
+    print("=" * 60)
+    pip_cmd = [str(python_exe), "-m", "pip", "install", "--upgrade", "pip"]
+    if verbose:
+        pip_cmd.extend(["--verbose", "--progress-bar", "pretty"])
+    
+    exit_code, output = run_command(pip_cmd, capture_output=not verbose, check=False)
     if exit_code == 0:
-        print_success("pip upgraded")
+        if verbose and output:
+            print(output)
+        print_success("pip upgraded successfully")
     else:
         print_warning("Failed to upgrade pip (continuing anyway)")
+        if output and not verbose:
+            print_info(output)
     
     # Install core dependencies
-    print("Installing core dependencies...")
-    exit_code, output = run_command(
-        [str(python_exe), "-m", "pip", "install", "-r", "requirements.txt"],
-        capture_output=True
-    )
+    print("\n" + "=" * 60)
+    print("Step 2: Installing core dependencies from requirements.txt...")
+    print("=" * 60)
+    print_info("This may take several minutes depending on your internet connection...")
+    print_info("Packages will be downloaded and installed from PyPI...")
+    
+    install_cmd = [str(python_exe), "-m", "pip", "install", "-r", str(requirements_file)]
+    if verbose:
+        install_cmd.extend(["--verbose", "--progress-bar", "pretty"])
+    else:
+        install_cmd.append("--progress-bar")
+    
+    print("\nStarting installation...")
+    exit_code, output = run_command(install_cmd, capture_output=not verbose)
+    
     if exit_code != 0:
-        print_error("Failed to install core dependencies")
-        print_error(output)
+        print_error("\nFailed to install core dependencies")
+        if verbose and output:
+            print_error("\nError output:")
+            print_error(output)
+        elif output:
+            # Show last few lines of error
+            error_lines = output.splitlines()[-20:]
+            print_error("\nError details (last 20 lines):")
+            for line in error_lines:
+                print_error(f"  {line}")
         return False
     
-    print_success("Core dependencies installed")
+    if verbose and output:
+        # Show summary of what was installed
+        lines = output.splitlines()
+        installed_packages = []
+        for line in lines:
+            if "Successfully installed" in line:
+                print_success(f"\n{line}")
+            elif "Requirement already satisfied" in line:
+                # Extract package name
+                if " " in line:
+                    pkg = line.split()[3] if len(line.split()) > 3 else ""
+                    if pkg:
+                        installed_packages.append(pkg)
+    
+    print_success("Core dependencies installed successfully")
     
     # Check for optional dependencies
     optional_req = Path("requirements-optional.txt")
     if optional_req.exists():
-        print_info("Installing optional dependencies...")
-        exit_code, output = run_command(
-            [str(python_exe), "-m", "pip", "install", "-r", "requirements-optional.txt"],
-            capture_output=True,
-            check=False
-        )
+        print("\n" + "=" * 60)
+        print("Step 3: Installing optional dependencies...")
+        print("=" * 60)
+        print_info("These packages enhance functionality but are not required for core features")
+        
+        try:
+            opt_content = optional_req.read_text()
+            opt_packages = []
+            for line in opt_content.splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    pkg_name = line.split(">=")[0].split("==")[0].split("~=")[0].strip()
+                    if pkg_name:
+                        opt_packages.append(pkg_name)
+            if opt_packages:
+                print_info(f"Optional packages: {', '.join(opt_packages)}")
+        except Exception:
+            pass
+        
+        opt_cmd = [str(python_exe), "-m", "pip", "install", "-r", str(optional_req)]
+        if verbose:
+            opt_cmd.extend(["--verbose", "--progress-bar", "pretty"])
+        else:
+            opt_cmd.append("--progress-bar")
+        
+        exit_code, output = run_command(opt_cmd, capture_output=not verbose, check=False)
         if exit_code == 0:
-            print_success("Optional dependencies installed")
+            print_success("Optional dependencies installed successfully")
+            if verbose and output:
+                print(output)
         else:
             print_warning("Some optional dependencies failed to install (non-critical)")
-            if output:
-                print_info(output)
+            if output and not verbose:
+                # Show error summary
+                error_lines = output.splitlines()[-10:]
+                print_warning("\nError details:")
+                for line in error_lines:
+                    print_warning(f"  {line}")
     
     # Verify key packages
-    print("\nVerifying key packages...")
+    print("\n" + "=" * 60)
+    print("Step 4: Verifying installation...")
+    print("=" * 60)
     key_packages = ["streamlit", "pandas", "sqlalchemy"]
     all_installed = True
     
     for package in key_packages:
-        exit_code, _ = run_command(
+        exit_code, output = run_command(
             [str(python_exe), "-m", "pip", "show", package],
             check=False,
             capture_output=True
         )
         if exit_code == 0:
-            print_success(f"{package} installed")
+            # Extract version from output
+            version = "unknown"
+            for line in output.splitlines():
+                if line.startswith("Version:"):
+                    version = line.split(":", 1)[1].strip()
+                    break
+            print_success(f"{package} installed (version: {version})")
         else:
             print_error(f"{package} not found")
             all_installed = False
@@ -890,6 +990,85 @@ def run_validation_checks(python_exe: Path) -> bool:
     return all_ok
 
 
+def run_tests(python_exe: Path) -> bool:
+    """
+    Run test suite to verify installation.
+    
+    Returns:
+        True if tests passed, False otherwise
+    """
+    print_header("Running Tests")
+    print_info("Running test suite to verify installation...")
+    print_info("This will run unit tests first (fastest), then integration tests...")
+    
+    # Run unit tests first (fastest)
+    print("\n[Unit Tests]")
+    print_info("Running unit tests...")
+    exit_code, output = run_command(
+        [str(python_exe), "-m", "pytest", "src/tests/unit", "-v", "--tb=short"],
+        capture_output=False,
+        check=False
+    )
+    
+    if exit_code != 0:
+        print_warning("Some unit tests failed")
+        return False
+    
+    print_success("Unit tests passed")
+    
+    # Run integration tests
+    print("\n[Integration Tests]")
+    print_info("Running integration tests...")
+    exit_code, output = run_command(
+        [str(python_exe), "-m", "pytest", "src/tests/integration", "-v", "--tb=short"],
+        capture_output=False,
+        check=False
+    )
+    
+    if exit_code != 0:
+        print_warning("Some integration tests failed")
+        return False
+    
+    print_success("Integration tests passed")
+    
+    print_success("\nAll tests passed! Installation verified.")
+    return True
+
+
+def launch_app(python_exe: Path) -> bool:
+    """
+    Launch the application.
+    
+    Returns:
+        True if app started successfully, False otherwise
+    """
+    print_header("Launching Application")
+    print_info("Starting CSV Wrangler application...")
+    print_info("The app will open in your default browser automatically")
+    print_info("Press Ctrl+C to stop the application\n")
+    
+    # Use run_app.py script
+    run_app_script = Path("run_app.py")
+    if not run_app_script.exists():
+        print_error("run_app.py not found")
+        return False
+    
+    try:
+        # Run the app (this will block until user stops it)
+        exit_code, _ = run_command(
+            [str(python_exe), str(run_app_script)],
+            capture_output=False,
+            check=False
+        )
+        return exit_code == 0
+    except KeyboardInterrupt:
+        print("\n\nApplication stopped by user")
+        return True
+    except Exception as e:
+        print_error(f"Failed to launch application: {e}")
+        return False
+
+
 def print_setup_summary(python_exe: Path, venv_active: bool):
     """Print setup summary and next steps."""
     print_header("Setup Complete!")
@@ -918,6 +1097,13 @@ def print_setup_summary(python_exe: Path, venv_active: bool):
     print("     OR")
     print("     streamlit run src/main.py")
     
+    print("  3. Run tests:")
+    print("     pytest")
+    print("     OR")
+    print("     pytest -m unit")
+    print("     OR")
+    print("     pytest -m integration")
+    
     print(f"\n{Colors.BOLD}Project Structure:{Colors.RESET}")
     print("  [OK] Source code: src/")
     print("  [OK] Tests: src/tests/")
@@ -932,10 +1118,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python setup_app.py              # Full setup
-  python setup_app.py --skip-deps  # Skip dependency installation
-  python setup_app.py --force      # Recreate virtual environment
-  python setup_app.py --python     # Select Python from detected installations
+  python setup_app.py                    # Full setup
+  python setup_app.py --skip-deps        # Skip dependency installation
+  python setup_app.py --force            # Recreate virtual environment
+  python setup_app.py --python PATH      # Use specific Python executable
+  python setup_app.py --run-tests        # Run tests after setup
+  python setup_app.py --launch-app       # Launch app after setup
+  python setup_app.py --run-tests --launch-app  # Run tests then launch app
+  python setup_app.py --no-verbose       # Less verbose dependency installation
         """
     )
     parser.add_argument(
@@ -968,6 +1158,22 @@ Examples:
         "--select-python",
         action="store_true",
         help="Show Python selection menu even if only one installation found"
+    )
+    parser.add_argument(
+        "--run-tests",
+        action="store_true",
+        help="Run test suite after setup to verify installation"
+    )
+    parser.add_argument(
+        "--launch-app",
+        action="store_true",
+        help="Launch the application after setup completes"
+    )
+    parser.add_argument(
+        "--no-verbose",
+        action="store_true",
+        dest="no_verbose",
+        help="Reduce verbosity of dependency installation output"
     )
     
     args = parser.parse_args()
@@ -1086,7 +1292,8 @@ Examples:
     
     # Step 3: Install dependencies
     if not args.skip_deps:
-        if not install_dependencies(python_exe):
+        verbose_install = not args.no_verbose
+        if not install_dependencies(python_exe, verbose=verbose_install):
             print_error("\nDependency installation failed.")
             sys.exit(1)
     else:
@@ -1101,6 +1308,23 @@ Examples:
     
     # Step 5: Print summary
     print_setup_summary(python_exe, venv_active)
+    
+    # Step 6: Run tests if requested
+    if args.run_tests:
+        print("\n")
+        tests_passed = run_tests(python_exe)
+        if not tests_passed:
+            print_warning("\nSome tests failed, but setup completed.")
+            print_info("You can run tests manually later with: pytest")
+        else:
+            print_success("\n✓ All tests passed - installation verified!")
+    
+    # Step 7: Launch app if requested
+    if args.launch_app:
+        print("\n")
+        if not launch_app(python_exe):
+            print_warning("\nFailed to launch application.")
+            print_info("You can launch manually with: python run_app.py")
 
 
 if __name__ == "__main__":
