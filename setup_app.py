@@ -513,7 +513,7 @@ def install_dependencies(python_exe: Path, verbose: bool = True) -> bool:
     print("=" * 60)
     pip_cmd = [str(python_exe), "-m", "pip", "install", "--upgrade", "pip"]
     if verbose:
-        pip_cmd.extend(["--verbose", "--progress-bar", "on"])
+        pip_cmd.append("--verbose")
     
     exit_code, output = run_command(pip_cmd, capture_output=not verbose, check=False)
     if exit_code == 0:
@@ -534,11 +534,10 @@ def install_dependencies(python_exe: Path, verbose: bool = True) -> bool:
     
     install_cmd = [str(python_exe), "-m", "pip", "install", "-r", str(requirements_file)]
     if verbose:
-        install_cmd.extend(["--verbose", "--progress-bar", "on"])
-    else:
-        install_cmd.extend(["--progress-bar", "on"])
+        install_cmd.append("--verbose")
     
     print("\nStarting installation...")
+    print_info("Installing packages...")
     exit_code, output = run_command(install_cmd, capture_output=not verbose)
     
     if exit_code != 0:
@@ -594,10 +593,9 @@ def install_dependencies(python_exe: Path, verbose: bool = True) -> bool:
         
         opt_cmd = [str(python_exe), "-m", "pip", "install", "-r", str(optional_req)]
         if verbose:
-            opt_cmd.extend(["--verbose", "--progress-bar", "on"])
-        else:
-            opt_cmd.extend(["--progress-bar", "on"])
+            opt_cmd.append("--verbose")
         
+        print_info("Installing optional packages...")
         exit_code, output = run_command(opt_cmd, capture_output=not verbose, check=False)
         if exit_code == 0:
             print_success("Optional dependencies installed successfully")
