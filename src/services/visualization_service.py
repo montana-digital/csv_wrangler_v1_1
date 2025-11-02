@@ -35,6 +35,16 @@ class PlotlyNotAvailableError(Exception):
             "Plotly package is not installed. Install it with: pip install plotly"
         )
 
+
+def is_visualization_available() -> bool:
+    """
+    Check if visualization capabilities are available (Plotly installed).
+    
+    Returns:
+        True if Plotly is available, False otherwise
+    """
+    return _plotly_available
+
 # Chart type constants
 CHART_BAR = "bar"
 CHART_LINE = "line"
