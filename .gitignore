@@ -1,0 +1,91 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+*.code-workspace
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Logs
+logs/
+*.log
+
+# Test outputs
+coverage.xml
+htmlcov/
+test-results/
+.pytest_cache/
+
+# Database files (never track)
+*.db
+*.sqlite
+*.sqlite3
+
+# User data - runtime user data should never be in repository
+userdata/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/cache/
+__pycache__/streamlit/
+
+# Temporary files
+*.tmp
+test_*.csv
+test_*.pkl
+*.bak
+*.write_test_tmp
+
+# Distribution bundles (for developers)
+distribution/
+bundle/
+*.zip
+*.7z
+
+# Git backups (temporary)
+.git_backup/
