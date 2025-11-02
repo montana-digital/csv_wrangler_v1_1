@@ -1,0 +1,13 @@
+# Core dependencies for CSV Wrangler
+# Required for basic functionality
+streamlit>=1.28.0
+pandas>=2.1.0
+sqlalchemy>=2.0.23
+
+# Optional dependencies (install separately if needed)
+# See requirements-optional.txt for full list
+# The application will work with limited functionality without these:
+# - python-dateutil>=2.8.2 (for advanced date parsing)
+# - plotly>=5.17.0 (for visualizations)
+# - pyarrow>=14.0.0 (for faster CSV reading)
+

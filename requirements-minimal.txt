@@ -1,0 +1,13 @@
+# Minimal dependencies for CSV Wrangler
+# Core packages required for basic functionality
+# Install this if you want the smallest package size possible
+
+streamlit>=1.28.0
+pandas>=2.1.0
+sqlalchemy>=2.0.23
+
+# Note: Without optional packages, the following features will have limited functionality:
+# - Visualizations: Not available (requires plotly)
+# - CSV reading: Uses standard pandas engine (slower for large files without pyarrow)
+# - Date parsing: Uses built-in datetime (fewer date formats supported without dateutil)
+

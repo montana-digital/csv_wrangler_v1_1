@@ -1,0 +1,16 @@
+# Optional dependencies for CSV Wrangler
+# These packages enhance functionality but are not required for core features
+
+# Visualization features (Data Geek page)
+# Install for interactive chart visualizations
+plotly>=5.17.0
+
+# Performance enhancement for CSV reading
+# Install for faster CSV file parsing (especially large files)
+pyarrow>=14.0.0
+
+# Advanced date parsing
+# Install for better date/datetime parsing in enrichment functions
+# Without this, date parsing uses built-in datetime (more limited formats)
+python-dateutil>=2.8.2
+

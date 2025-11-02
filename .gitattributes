@@ -1,0 +1,4 @@
+# Git attributes for versioning
+VERSION export-subst
+src/__version__.py export-subst
+

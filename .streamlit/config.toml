@@ -1,0 +1,26 @@
+# Streamlit Configuration for CSV Wrangler
+# This file ensures consistent behavior across installations
+
+[server]
+# Port will be set via command line, but default here
+port = 8501
+# Automatically open browser
+headless = false
+# Run on save (disabled for production)
+runOnSave = false
+# Allow file uploads
+enableXsrfProtection = true
+
+[browser]
+# Gather usage stats (disabled for privacy)
+gatherUsageStats = false
+# Automatically open browser
+serverAddress = "localhost"
+
+[theme]
+# Use default theme (can be customized later)
+primaryColor = "#FF4B4B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+font = "sans serif"

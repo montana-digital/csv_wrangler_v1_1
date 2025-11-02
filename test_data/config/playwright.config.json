@@ -1,0 +1,6 @@
+{
+  "browsers": ["chromium"],
+  "browserDir": "../../docs",
+  "playwrightDir": "../../docs"
+}
+

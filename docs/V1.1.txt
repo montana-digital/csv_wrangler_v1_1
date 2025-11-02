@@ -1,0 +1,27 @@
+V1.1
+Add a new Page - Enrichment Suite
+User can select a Table from Dropdown of one of the Dataset Tables..
+The user can now select a column and select what enrichment function should be run on it.
+An enrichment function will create a copy of the Dataset and add a new column next to the user selected column.
+Enrichment functions
+	- Check & Format | Phone Numbers
+	- Check & Format | Web Domains
+	- Check & Format | Emails
+	- Check & Format | Date Only Field
+	- Check & Format | Date Time Field
+
+The enrichment function will iterate through the column datacells and verify if the data matches the desired format. Best effort and intelligence parsing is required to make a best effort to validate phone Number and URLs offline. Try to extract the desired data.
+
+The user should select a table from drop down
+Select a specific columns to which to apply the function. Allow for multiple columns and functions to be ran on the same table.
+The function will copy the original table and adds the columns to the new table, calling it enriched-tablename_v1
+This new table should update as the original dataset is updated with new records via the upload. The user should see a tracker for all the enriched datasets available on the Enrichment Suite Page. The existing enriched tables being tracked should display when they have last update synced with the original. What columns have been added. When the enriched table updates with new data, the enrichment functions runs to populate the added columns.
+
+Add a new Page - DataFrame View
+This view allows the user to select a table from the dropdown, which will load the Dataset into a DataFrame.
+	- Load most recently added records first - default to 10,000
+	- Allow user dataset filtering and searching functions to explore the dataset in detail. Some datasets maybe very large.
+	- Some datasets will contain an image field. By default, this field should be hidden and not loaded, as it will be a very large dataset. If there is an Image containing column, require the user to specifically select to show the image column.
+	- Images do not need to be displayed on this page. Purely working with dataframes on this Page.
+	- Provide the user an advanced UI set of tools to wrangle the dataset.
+
