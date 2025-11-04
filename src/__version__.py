@@ -7,8 +7,8 @@ Version format: MAJOR.MINOR.PATCH
 - MINOR: New features, backward compatible
 - PATCH: Bug fixes, backward compatible
 """
-__version__ = "1.0.2"
-__version_info__ = (1, 0, 2)
+__version__ = "1.0.3"
+__version_info__ = (1, 0, 3)
 
 # Version history
 VERSION_HISTORY = {
@@ -151,6 +151,15 @@ VERSION_HISTORY = {
             "Added Version History section to Home page with expandable version details",
             "Improved error handling with SafeOperation context manager for Knowledge Base operations",
             "Enhanced duplicate detection to handle intra-file duplicates vs database duplicates separately",
+        ],
+    },
+    "1.0.3": {
+        "date": "2025-11-04",
+        "status": "final",
+        "description": "Version History Update - Documentation and versioning improvements",
+        "features": [
+            "Version history properly displayed on Home page",
+            "All recent fixes documented in version history",
         ],
     },
 }
