@@ -1,0 +1,10 @@
+item_name,quantity,location,warehouse,last_restocked
+Widget A,150,Warehouse A,Main,2024-01-10
+Widget B,200,Warehouse B,Secondary,2024-01-15
+Widget C,75,Warehouse A,Main,2024-01-20
+Widget D,300,Warehouse C,Tertiary,2024-01-25
+Component X,125,Warehouse A,Main,2024-02-01
+Component Y,180,Warehouse B,Secondary,2024-02-05
+Component Z,90,Warehouse A,Main,2024-02-10
+Part Alpha,220,Warehouse C,Tertiary,2024-02-15
+

@@ -7,8 +7,8 @@ Version format: MAJOR.MINOR.PATCH
 - MINOR: New features, backward compatible
 - PATCH: Bug fixes, backward compatible
 """
-__version__ = "1.0.1"
-__version_info__ = (1, 0, 1)
+__version__ = "1.0.2"
+__version_info__ = (1, 0, 2)
 
 # Version history
 VERSION_HISTORY = {
@@ -137,6 +137,20 @@ VERSION_HISTORY = {
             "Improved error handling in migrations with detailed logging",
             "Removed unnecessary pool_pre_ping for SQLite connections",
             "Enhanced transaction isolation documentation",
+        ],
+    },
+    "1.0.2": {
+        "date": "2025-11-04",
+        "status": "final",
+        "description": "Knowledge Base Fixes and Version History Display - Critical bug fixes and UX improvements",
+        "features": [
+            "Fixed Knowledge Base delete functionality - added explicit session commit",
+            "Fixed Knowledge Search not showing enriched dataset results - improved column matching and type checking",
+            "Fixed Knowledge Table upload duplicate Key_ID handling - deduplication within upload DataFrame",
+            "Added comprehensive debug logging for Knowledge Search troubleshooting",
+            "Added Version History section to Home page with expandable version details",
+            "Improved error handling with SafeOperation context manager for Knowledge Base operations",
+            "Enhanced duplicate detection to handle intra-file duplicates vs database duplicates separately",
         ],
     },
 }

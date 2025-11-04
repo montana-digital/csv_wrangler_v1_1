@@ -57,3 +57,35 @@ with get_session() as session:
         st.subheader("📥 Recent Activity")
         st.info("Recent uploads summary will be displayed here.")
 
+    st.markdown("---")
+    
+    # Version History Section
+    st.subheader("📋 Version History")
+    from src.__version__ import get_version, get_version_history
+    
+    current_version = get_version()
+    version_history = get_version_history()
+    
+    # Display current version
+    st.markdown(f"**Current Version:** `{current_version}`")
+    st.markdown("---")
+    
+    # Display version history (most recent first)
+    # Sort versions by date (descending)
+    sorted_versions = sorted(
+        version_history.items(),
+        key=lambda x: x[1]["date"],
+        reverse=True
+    )
+    
+    for version, info in sorted_versions:
+        with st.expander(
+            f"**v{version}** - {info['description']} ({info['date']})",
+            expanded=(version == current_version)
+        ):
+            st.markdown(f"**Release Date:** {info['date']}")
+            st.markdown(f"**Status:** {info['status'].title()}")
+            st.markdown("**Features:**")
+            for feature in info["features"]:
+                st.markdown(f"- {feature}")
+

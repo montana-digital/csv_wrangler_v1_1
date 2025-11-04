@@ -19,6 +19,7 @@ from src.services.knowledge_service import (
 from src.services.table_service import get_table_row_count
 from src.ui.components.data_viewer import render_data_viewer
 from src.ui.components.knowledge_stats import render_knowledge_stats
+from src.utils.error_handler import SafeOperation
 
 
 def render_knowledge_container(
@@ -202,11 +203,20 @@ def render_delete_section(
             type="primary",
             disabled=not delete_enabled,
         ):
-            try:
+            with SafeOperation(
+                operation_name="Delete Knowledge Table",
+                error_code="DATABASE_ERROR",
+                suppress_error=False,  # Let exceptions propagate so session rollback works
+            ):
                 with st.spinner("Deleting Knowledge Table..."):
                     delete_knowledge_table(session, knowledge_table.id)
-                    st.success(f"✅ Knowledge Table '{knowledge_table.name}' deleted successfully")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Error deleting Knowledge Table: {e}")
+                    
+                    # Explicitly flush and commit to ensure deletion is persisted
+                    # This is necessary because st.rerun() will restart the page
+                    session.flush()
+                    session.commit()
+            
+            # If we get here, deletion succeeded (no exception)
+            st.success(f"✅ Knowledge Table '{knowledge_table.name}' deleted successfully")
+            st.rerun()
 

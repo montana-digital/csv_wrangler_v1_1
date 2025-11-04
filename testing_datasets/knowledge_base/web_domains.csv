@@ -1,0 +1,17 @@
+domain,company,website_url,status,verified_date,ssl_enabled
+example.com,Acme Corp,https://www.example.com,Active,2023-01-15,Yes
+test.com,Tech Solutions,https://www.test.com,Active,2023-02-20,Yes
+domain.com,Global Inc,https://www.domain.com,Active,2023-03-10,Yes
+email.org,Startup Co,https://www.email.org,Active,2023-04-05,Yes
+test.net,Big Corp,https://www.test.net,Active,2023-05-12,Yes
+example.io,Media Group,https://www.example.io,Active,2023-06-18,Yes
+domain.co.uk,Finance Ltd,https://www.domain.co.uk,Active,2023-07-22,Yes
+test.us,Music Studio,https://www.test.us,Active,2023-08-30,Yes
+example.com,Entertainment Inc,https://www.example.com,Active,2023-09-15,Yes
+test.com,Theater Co,https://www.test.com,Active,2023-10-20,Yes
+domain.org,Film Studio,https://www.domain.org,Active,2023-11-25,Yes
+email.com,Production House,https://www.email.com,Active,2023-12-01,Yes
+test.net,TV Network,https://www.test.net,Active,2024-01-10,Yes
+example.io,Comedy Club,https://www.example.io,Active,2024-02-15,Yes
+domain.co,Movie Studio,https://www.domain.co,Active,2024-03-20,Yes
+

@@ -20,6 +20,7 @@ from src.ui.components.dataset_config import render_dataset_config_ui
 from src.ui.components.export_panel import render_export_panel
 from src.ui.components.error_display import handle_exception
 from src.utils.error_handler import SafeOperation
+from src.utils.errors import DuplicateFileError
 
 
 def render_dataset_page(slot_number: int) -> None:
@@ -81,47 +82,64 @@ def render_dataset_page(slot_number: int) -> None:
             uploaded_file_path, filename = render_file_uploader(dataset.id, dataset.name)
 
             if uploaded_file_path and filename:
-                try:
-                    # Check for duplicate
+                # Check if user has already confirmed duplicate upload
+                duplicate_confirmed = st.session_state.get(f"confirm_upload_{dataset.id}", False)
+                
+                # Only check for duplicate if user hasn't confirmed yet
+                if not duplicate_confirmed:
                     try:
                         check_duplicate_filename(session, dataset.id, filename)
-                    except Exception as dup_error:
-                        if "duplicate" in str(dup_error).lower():
-                            if not st.session_state.get(f"confirm_upload_{dataset.id}", False):
-                                st.warning(f"⚠️ File '{filename}' has been uploaded before. Continue anyway?")
-                                if st.button("Yes, Upload Anyway", key=f"confirm_{dataset.id}"):
-                                    st.session_state[f"confirm_upload_{dataset.id}"] = True
-                                    st.rerun()
-                                else:
-                                    st.stop()
+                        # No duplicate - proceed with upload
+                    except DuplicateFileError:
+                        # Duplicate detected - show warning and get user confirmation
+                        st.warning(f"⚠️ File '{filename}' has been uploaded before. Continue anyway?")
+                        if st.button("Yes, Upload Anyway", key=f"confirm_{dataset.id}"):
+                            st.session_state[f"confirm_upload_{dataset.id}"] = True
+                            st.rerun()
                         else:
-                            raise
-
-                    # Upload file
-                    with SafeOperation(
-                        "upload_file",
-                        error_code="UPLOAD_FAILED",
-                        show_troubleshooting=True,
-                    ):
-                        upload_log = upload_csv_to_dataset(
-                            session=session,
-                            dataset_id=dataset.id,
-                            csv_file=uploaded_file_path,
-                            filename=filename,
-                            show_progress=True,
-                        )
-                        st.success(f"✅ Uploaded {upload_log.row_count} rows from {filename}")
-                        st.session_state[f"confirm_upload_{dataset.id}"] = False
-                        st.rerun()
-
-                except Exception as e:
-                    handle_exception(e, "UPLOAD_FAILED", show_troubleshooting=True)
-                finally:
-                    if uploaded_file_path.exists():
-                        try:
-                            uploaded_file_path.unlink()
-                        except Exception:
-                            pass  # Ignore cleanup errors
+                            # User cancelled - clean up and stop
+                            if uploaded_file_path.exists():
+                                try:
+                                    uploaded_file_path.unlink()
+                                except Exception:
+                                    pass
+                            st.stop()
+                        return  # Exit early - waiting for user confirmation
+                    except Exception as e:
+                        # Any other exception during duplicate check - propagate to SafeOperation
+                        raise
+                # User has confirmed duplicate upload - proceed with upload (skip duplicate check)
+                
+                # Upload file (SafeOperation handles errors and displays them)
+                with SafeOperation(
+                    "upload_file",
+                    error_code="UPLOAD_FAILED",
+                    show_troubleshooting=True,
+                ):
+                    # Skip duplicate check if user confirmed duplicate upload
+                    skip_duplicate = st.session_state.get(f"confirm_upload_{dataset.id}", False)
+                    upload_log = upload_csv_to_dataset(
+                        session=session,
+                        dataset_id=dataset.id,
+                        csv_file=uploaded_file_path,
+                        filename=filename,
+                        show_progress=True,
+                        skip_duplicate_check=skip_duplicate,
+                    )
+                
+                # Only show success and rerun if upload completed without exception
+                # (SafeOperation would have re-raised if there was an error)
+                st.success(f"✅ Uploaded {upload_log.row_count} rows from {filename}")
+                st.session_state[f"confirm_upload_{dataset.id}"] = False
+                
+                # Cleanup temporary file before rerun
+                if uploaded_file_path.exists():
+                    try:
+                        uploaded_file_path.unlink()
+                    except Exception:
+                        pass  # Ignore cleanup errors
+                
+                st.rerun()
 
             st.markdown("---")
 

@@ -264,7 +264,7 @@ def create_enriched_dataset(
         # Clean up orphaned table if it was created (before rollback)
         # Note: DDL operations in SQLite are auto-committed, so this will succeed
         try:
-            from src.utils.validation import table_exists, quote_identifier
+            from src.utils.validation import table_exists
             if table_exists(session, enriched_table_name):
                 # Check if EnrichedDataset record exists - if not, table is orphaned
                 existing_enriched = session.query(EnrichedDataset).filter_by(
@@ -290,7 +290,7 @@ def create_enriched_dataset(
         # Clean up orphaned table if it was created (before rollback)
         # Note: DDL operations in SQLite are auto-committed, so this will succeed
         try:
-            from src.utils.validation import table_exists, quote_identifier
+            from src.utils.validation import table_exists
             if table_exists(session, enriched_table_name):
                 # Check if EnrichedDataset record exists - if not, table is orphaned
                 existing_enriched = session.query(EnrichedDataset).filter_by(

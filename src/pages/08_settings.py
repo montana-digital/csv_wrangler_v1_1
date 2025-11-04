@@ -13,6 +13,7 @@ from src.services.profile_service import (
     update_profile_name,
 )
 from src.utils.file_utils import cleanup_dataset_originals
+from src.utils.error_handler import SafeOperation
 from src.config.settings import LOGO_DIR
 from src.ui.components.sidebar import render_sidebar
 
@@ -182,19 +183,27 @@ with get_session() as session:
                         key=f"delete_btn_{dataset_id}",
                         disabled=confirm_text != dataset.name,
                     ):
-                        try:
+                        with SafeOperation(
+                            operation_name="Delete Dataset",
+                            error_code="DATABASE_ERROR",
+                            suppress_error=False,  # Let exceptions propagate so session rollback works
+                        ):
                             with st.spinner("Deleting dataset..."):
                                 # Cleanup originals
                                 cleanup_dataset_originals(dataset.name)
 
                                 # Delete dataset (this will cascade delete upload logs)
+                                # DDL operations (DROP TABLE) auto-commit, but session.delete needs commit
                                 delete_dataset(session, dataset.id)
-
-                                st.success(f"✅ Dataset '{dataset.name}' deleted successfully!")
-                                st.rerun()
-
-                        except Exception as e:
-                            st.error(f"Failed to delete dataset: {e}")
+                                
+                                # Explicitly flush and commit to ensure deletion is persisted
+                                # This is necessary because st.rerun() will restart the page
+                                session.flush()
+                                session.commit()
+                        
+                        # If we get here, deletion succeeded (no exception)
+                        st.success(f"✅ Dataset '{dataset.name}' deleted successfully!")
+                        st.rerun()
 
     st.markdown("---")
 

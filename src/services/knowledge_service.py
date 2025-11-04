@@ -408,7 +408,27 @@ def upload_to_knowledge_table(
             ],
         }
     
-    # Check for existing Key_IDs (duplicate detection)
+    # Check for duplicates WITHIN the upload DataFrame first
+    # Multiple rows can standardize to the same Key_ID, causing UNIQUE constraint violations
+    # Keep only the first occurrence of each Key_ID
+    initial_count = len(valid_df)
+    valid_df = valid_df.drop_duplicates(subset=["Key_ID"], keep="first")
+    intra_duplicate_count = initial_count - len(valid_df)
+    
+    # Track intra-DataFrame duplicates for skipped list
+    intra_duplicate_indices = []
+    if intra_duplicate_count > 0:
+        # Find which rows were dropped due to intra-DataFrame duplicates
+        original_df = df_with_keys[~df_with_keys["Key_ID"].isna()].copy()
+        seen_keys = set()
+        for idx in original_df.index:
+            key_id = original_df.loc[idx, "Key_ID"]
+            if key_id in seen_keys:
+                intra_duplicate_indices.append(int(idx))
+            else:
+                seen_keys.add(key_id)
+    
+    # Check for existing Key_IDs (duplicate detection against database)
     from src.utils.validation import quote_identifier
     quoted_table = quote_identifier(knowledge_table.table_name)
     quoted_key_id = quote_identifier("Key_ID")
@@ -451,7 +471,7 @@ def upload_to_knowledge_table(
     # Build skipped list
     skipped_list = []
     
-    # Invalid rows
+    # Invalid rows (standardization failed)
     for idx in invalid_df.index:
         skipped_list.append({
             "row_index": int(idx),
@@ -459,11 +479,19 @@ def upload_to_knowledge_table(
             "key_value": str(df.loc[idx, knowledge_table.primary_key_column]),
         })
     
-    # Duplicate rows
+    # Intra-DataFrame duplicates (duplicates within the upload)
+    for idx in intra_duplicate_indices:
+        skipped_list.append({
+            "row_index": int(idx),
+            "reason": "Duplicate Key_ID in upload (same Key_ID already in this file)",
+            "key_value": str(df_with_keys.loc[idx, "Key_ID"]),
+        })
+    
+    # Database duplicates (Key_ID already exists in database)
     for idx in duplicate_df.index:
         skipped_list.append({
             "row_index": int(idx),
-            "reason": "Key_ID already exists",
+            "reason": "Key_ID already exists in Knowledge Table",
             "key_value": str(duplicate_df.loc[idx, "Key_ID"]),
         })
     
@@ -471,11 +499,14 @@ def upload_to_knowledge_table(
     knowledge_table.updated_at = datetime.now()
     repo.update(knowledge_table)
     
+    # Total duplicates = intra-DataFrame duplicates + database duplicates
+    total_duplicates = intra_duplicate_count + len(duplicate_df)
+    
     return {
         "total_rows": len(df),
-        "processed": len(valid_df),
+        "processed": len(valid_df) + intra_duplicate_count,  # Include intra-duplicates in processed count
         "added": rows_added,
-        "skipped_duplicates": len(duplicate_df),
+        "skipped_duplicates": total_duplicates,
         "skipped_invalid": len(invalid_df),
         "skipped_list": skipped_list,
     }

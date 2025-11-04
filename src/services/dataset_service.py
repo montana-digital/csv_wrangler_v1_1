@@ -284,6 +284,7 @@ def upload_csv_to_dataset(
     csv_file: Path,
     filename: str,
     show_progress: bool = True,
+    skip_duplicate_check: bool = False,
 ) -> UploadLog:
     """
     Upload CSV file to existing dataset.
@@ -295,13 +296,15 @@ def upload_csv_to_dataset(
         dataset_id: Dataset ID
         csv_file: Path to CSV file
         filename: Original filename
+        show_progress: Whether to show progress indicators
+        skip_duplicate_check: If True, skip duplicate filename check (for user-confirmed duplicates)
         
     Returns:
         UploadLog instance
         
     Raises:
         SchemaMismatchError: If columns don't match
-        DuplicateFileError: If filename already uploaded
+        DuplicateFileError: If filename already uploaded (unless skip_duplicate_check=True)
         DatabaseError: If upload fails
     """
     # Get dataset configuration
@@ -309,8 +312,9 @@ def upload_csv_to_dataset(
     if not dataset:
         raise ValidationError(f"Dataset with ID {dataset_id} not found")
 
-    # Check for duplicate filename
-    check_duplicate_filename(session, dataset_id, filename)
+    # Check for duplicate filename (unless explicitly skipped)
+    if not skip_duplicate_check:
+        check_duplicate_filename(session, dataset_id, filename)
 
     # Parse CSV with progress indicator
     if show_progress:
@@ -387,24 +391,50 @@ def upload_csv_to_dataset(
         logger.info(f"Uploaded {total_rows} rows from {filename} to dataset {dataset_id}")
 
         # Trigger enriched dataset sync (v1.1 feature)
-        try:
-            from src.services.enrichment_service import sync_all_enriched_datasets_for_source
-            sync_results = sync_all_enriched_datasets_for_source(session, dataset_id)
-            if sync_results:
-                logger.info(
-                    f"Synced {len(sync_results)} enriched datasets for source dataset {dataset_id}"
+        # Pre-check: Only attempt sync if enriched datasets exist
+        from src.database.models import EnrichedDataset
+        enriched_datasets = (
+            session.query(EnrichedDataset)
+            .filter_by(source_dataset_id=dataset_id)
+            .all()
+        )
+
+        if enriched_datasets:
+            try:
+                from src.services.enrichment_service import sync_all_enriched_datasets_for_source
+                sync_results = sync_all_enriched_datasets_for_source(session, dataset_id)
+                if sync_results:
+                    successful_syncs = sum(1 for v in sync_results.values() if v >= 0)
+                    if successful_syncs > 0:
+                        logger.info(
+                            f"Synced {successful_syncs} enriched datasets for source dataset {dataset_id}"
+                        )
+            except ValidationError as sync_error:
+                # Expected: missing tables, orphaned datasets, etc.
+                logger.warning(
+                    f"Enriched dataset sync skipped (validation error): {sync_error}",
+                    exc_info=False,  # Don't log stack trace for expected errors
                 )
-        except Exception as sync_error:
-            # Don't fail upload if sync fails - log and continue
-            logger.warning(
-                f"Failed to sync enriched datasets after upload: {sync_error}",
-                exc_info=True,
-            )
+            except DatabaseError as sync_error:
+                # Database issues during sync - log but don't fail upload
+                logger.warning(
+                    f"Enriched dataset sync failed (database error): {sync_error}",
+                    exc_info=True,
+                )
+            except Exception as sync_error:
+                # Unexpected errors - log with full details
+                logger.error(
+                    f"Unexpected error during enriched dataset sync: {sync_error}",
+                    exc_info=True,
+                )
+            # Never re-raise - sync failures shouldn't affect upload success
+        else:
+            logger.debug(f"No enriched datasets to sync for dataset {dataset_id}")
 
         return upload_log
 
     except Exception as e:
-        session.rollback()
+        # Context manager handles rollback automatically
         logger.error(f"Failed to upload CSV: {e}", exc_info=True)
         raise DatabaseError(f"Failed to upload CSV: {e}", operation="upload_csv") from e
 
@@ -434,13 +464,21 @@ def get_dataset_statistics(
     if not dataset:
         raise ValidationError(f"Dataset with ID {dataset_id} not found")
 
-    # Get row count
-    from src.utils.validation import quote_identifier
-    quoted_table = quote_identifier(dataset.table_name)
-    result = session.execute(
-        text(f"SELECT COUNT(*) FROM {quoted_table}")
-    )
-    total_rows = result.scalar() or 0
+    # Get row count - check if table exists first
+    from src.utils.validation import quote_identifier, table_exists
+    total_rows = 0
+    if table_exists(session, dataset.table_name):
+        quoted_table = quote_identifier(dataset.table_name)
+        result = session.execute(
+            text(f"SELECT COUNT(*) FROM {quoted_table}")
+        )
+        total_rows = result.scalar() or 0
+    else:
+        # Table doesn't exist - dataset might be in corrupted state or already partially deleted
+        logger.warning(
+            f"Table '{dataset.table_name}' for dataset {dataset_id} does not exist. "
+            f"Returning 0 rows."
+        )
 
     # Get upload statistics
     upload_logs = (

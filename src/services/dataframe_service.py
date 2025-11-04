@@ -127,10 +127,19 @@ def get_dataset_row_count(session: Session, dataset_id: int) -> int:
         dataset_id: Dataset ID
         
     Returns:
-        Total number of rows
+        Total number of rows (0 if table doesn't exist)
     """
     dataset = session.get(DatasetConfig, dataset_id)
     if not dataset:
+        return 0
+    
+    # Check if table exists before querying
+    from src.utils.validation import table_exists
+    if not table_exists(session, dataset.table_name):
+        logger.warning(
+            f"Table '{dataset.table_name}' for dataset {dataset_id} does not exist. "
+            f"Returning 0 rows."
+        )
         return 0
     
     try:
@@ -288,10 +297,19 @@ def get_enriched_dataset_row_count(session: Session, enriched_dataset_id: int) -
         enriched_dataset_id: Enriched dataset ID
         
     Returns:
-        Total number of rows
+        Total number of rows (0 if table doesn't exist)
     """
     enriched_dataset = session.get(EnrichedDataset, enriched_dataset_id)
     if not enriched_dataset:
+        return 0
+    
+    # Check if table exists before querying
+    from src.utils.validation import table_exists
+    if not table_exists(session, enriched_dataset.enriched_table_name):
+        logger.warning(
+            f"Table '{enriched_dataset.enriched_table_name}' for enriched dataset {enriched_dataset_id} does not exist. "
+            f"Returning 0 rows."
+        )
         return 0
     
     try:

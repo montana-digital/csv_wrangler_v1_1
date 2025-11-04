@@ -1,0 +1,10 @@
+item_name,quantity,location,warehouse,last_restocked
+Part Beta,175,Warehouse A,Main,2024-02-20
+Part Gamma,250,Warehouse B,Secondary,2024-02-25
+Module 1,95,Warehouse A,Main,2024-03-01
+Module 2,140,Warehouse C,Tertiary,2024-03-05
+Module 3,110,Warehouse A,Main,2024-03-10
+Unit A,195,Warehouse B,Secondary,2024-03-15
+Unit B,160,Warehouse A,Main,2024-03-20
+Unit C,210,Warehouse C,Tertiary,2024-03-25
+

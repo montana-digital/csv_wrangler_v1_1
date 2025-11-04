@@ -141,6 +141,22 @@ def search_knowledge_base(
     # Search enriched datasets (fast - uses enriched column indexes)
     enriched_dataset_results = []
     for enriched_dataset in matching_enriched:
+        # Ensure columns_added is a list (it's stored as JSON, might be None or wrong type)
+        if not enriched_dataset.columns_added:
+            logger.debug(
+                f"Enriched dataset {enriched_dataset.name} (ID: {enriched_dataset.id}) "
+                f"has no columns_added (None or empty)"
+            )
+            continue
+        
+        # Ensure columns_added is a list (SQLAlchemy should deserialize JSON, but verify)
+        if not isinstance(enriched_dataset.columns_added, list):
+            logger.warning(
+                f"Enriched dataset {enriched_dataset.name} (ID: {enriched_dataset.id}) "
+                f"has columns_added of type {type(enriched_dataset.columns_added)}, expected list"
+            )
+            continue
+        
         # Find enriched columns using matching function
         matching_columns = [
             col_name
@@ -148,39 +164,60 @@ def search_knowledge_base(
             if func_name == data_type
         ]
         
+        if not matching_columns:
+            logger.debug(
+                f"Enriched dataset {enriched_dataset.name} (ID: {enriched_dataset.id}) "
+                f"has no matching columns for data_type {data_type}"
+            )
+            continue
+        
         for col_name in matching_columns:
             # Sanitize column name to match enriched column naming convention
             # (enriched columns are created with sanitized names)
             sanitized_col_name = sanitize_column_name(col_name)
             enriched_col_name = f"{sanitized_col_name}_enriched_{data_type}"
             
-            if enriched_dataset.columns_added and enriched_col_name in enriched_dataset.columns_added:
-                try:
-                    # Use indexed enriched column for fast lookup
-                    # Note: enriched_col_name is already sanitized (no spaces), but quote for safety
-                    quoted_table = quote_identifier(enriched_dataset.enriched_table_name)
-                    quoted_col = quote_identifier(enriched_col_name)
-                    count_query = text(
-                        f"SELECT COUNT(*) FROM {quoted_table} "
-                        f"WHERE {quoted_col} = :key_id"
-                    )
-                    result = session.execute(count_query, {"key_id": standardized_key_id})
-                    row_count = result.scalar() or 0
-                    
-                    enriched_dataset_results.append({
-                        "dataset_id": enriched_dataset.id,
-                        "name": enriched_dataset.name,
-                        "enriched_table_name": enriched_dataset.enriched_table_name,
-                        "source_column": col_name,
-                        "enriched_column": enriched_col_name,
-                        "row_count": int(row_count),
-                    })
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to search enriched dataset {enriched_dataset.name} "
-                        f"column {enriched_col_name}: {e}"
-                    )
-                    continue
+            # Verify enriched column exists in columns_added list
+            if enriched_col_name not in enriched_dataset.columns_added:
+                logger.debug(
+                    f"Enriched column '{enriched_col_name}' not found in columns_added "
+                    f"for enriched dataset {enriched_dataset.name} (ID: {enriched_dataset.id}). "
+                    f"Available columns: {enriched_dataset.columns_added}"
+                )
+                continue
+            
+            try:
+                # Use indexed enriched column for fast lookup
+                # Note: enriched_col_name is already sanitized (no spaces), but quote for safety
+                quoted_table = quote_identifier(enriched_dataset.enriched_table_name)
+                quoted_col = quote_identifier(enriched_col_name)
+                count_query = text(
+                    f"SELECT COUNT(*) FROM {quoted_table} "
+                    f"WHERE {quoted_col} = :key_id"
+                )
+                result = session.execute(count_query, {"key_id": standardized_key_id})
+                row_count = result.scalar() or 0
+                
+                logger.debug(
+                    f"Search in enriched dataset {enriched_dataset.name} "
+                    f"column {enriched_col_name}: {row_count} rows found"
+                )
+                
+                enriched_dataset_results.append({
+                    "dataset_id": enriched_dataset.id,
+                    "name": enriched_dataset.name,
+                    "enriched_table_name": enriched_dataset.enriched_table_name,
+                    "source_column": col_name,
+                    "enriched_column": enriched_col_name,
+                    "row_count": int(row_count),
+                })
+            except Exception as e:
+                logger.warning(
+                    f"Failed to search enriched dataset {enriched_dataset.name} "
+                    f"column {enriched_col_name}: {e}",
+                    exc_info=True
+                )
+                continue
     
     # Calculate statistics
     total_sources = len(knowledge_table_results) + len(enriched_dataset_results)

@@ -1,0 +1,17 @@
+email,company,status,verified_date,notes
+john.smith@example.com,Acme Corp,Active,2023-01-15,Primary contact
+jane.doe@test.com,Tech Solutions,Active,2023-02-20,Marketing lead
+bob.j@domain.com,Global Inc,Active,2023-03-10,Sales contact
+alice.w@email.org,Startup Co,Active,2023-04-05,Technical lead
+charlie@test.net,Big Corp,Active,2023-05-12,Executive
+diana@example.io,Media Group,Active,2023-06-18,Editor
+ed@domain.co.uk,Finance Ltd,Active,2023-07-22,Accountant
+fiona@test.us,Music Studio,Active,2023-08-30,Producer
+george@example.com,Entertainment Inc,Active,2023-09-15,Director
+helen@test.com,Theater Co,Active,2023-10-20,Actress
+ian@domain.org,Film Studio,Active,2023-11-25,Producer
+julia@email.com,Production House,Active,2023-12-01,Director
+kevin@test.net,TV Network,Active,2024-01-10,Host
+lisa@example.io,Comedy Club,Active,2024-02-15,Comedian
+matt@domain.co,Movie Studio,Active,2024-03-20,Actor
+

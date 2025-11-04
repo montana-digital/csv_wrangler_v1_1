@@ -1,0 +1,10 @@
+name,email,phone,company,join_date
+John Smith,john.smith@example.com,+1234567890,Acme Corp,2023-01-15
+Jane Doe,jane.doe@test.com,+1987654321,Tech Solutions,2023-02-20
+Bob Johnson,bob.j@domain.com,+1555123456,Global Inc,2023-03-10
+Alice Williams,alice.w@email.org,+1444555666,Startup Co,2023-04-05
+Charlie Brown,charlie@test.net,+1777888999,Big Corp,2023-05-12
+Diana Prince,diana@example.io,+1222333444,Media Group,2023-06-18
+Edward Norton,ed@domain.co.uk,+1666777888,Finance Ltd,2023-07-22
+Fiona Apple,fiona@test.us,+1888999000,Music Studio,2023-08-30
+
