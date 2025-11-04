@@ -129,18 +129,20 @@ def render_dataset_page(slot_number: int) -> None:
             try:
                 stats = get_dataset_statistics(session, dataset.id)
                 if stats["total_rows"] > 0:
-                    # Load recent data
-                    from sqlalchemy import text
-                    from src.utils.validation import quote_identifier
+                    # Load recent data (exclude image columns for performance)
+                    from src.services.dataframe_service import load_dataset_dataframe
+                    import pandas as pd
 
-                    quoted_table = quote_identifier(dataset.table_name)
-                    query = text(f"SELECT * FROM {quoted_table} ORDER BY rowid DESC LIMIT 10000")
-                    result = session.execute(query)
-                    rows = result.fetchall()
+                    df = load_dataset_dataframe(
+                        session=session,
+                        dataset_id=dataset.id,
+                        limit=10000,
+                        offset=0,
+                        include_image_columns=False,  # Exclude images for performance
+                        order_by_recent=True,
+                    )
 
-                    if rows:
-                        import pandas as pd
-                        df = pd.DataFrame(rows, columns=result.keys())
+                    if not df.empty:
                         render_data_viewer(df)
             except Exception as e:
                 handle_exception(e, "DATABASE_ERROR", show_troubleshooting=True)

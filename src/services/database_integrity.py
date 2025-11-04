@@ -165,12 +165,12 @@ def cleanup_orphaned_data(session: Session, dry_run: bool = True) -> dict[str, A
                 try:
                     quoted_table = quote_identifier(table_name)
                     session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                    session.commit()
+                    # DDL operations auto-commit in SQLite
                     results["tables_dropped"].append(table_name)
                     logger.info(f"Dropped orphaned enriched table: {table_name}")
                 except Exception as e:
                     logger.warning(f"Failed to drop orphaned table {table_name}: {e}")
-                    session.rollback()
+                    # Rollback will happen in context manager
             else:
                 results["tables_dropped"].append(table_name)
         
@@ -181,7 +181,7 @@ def cleanup_orphaned_data(session: Session, dry_run: bool = True) -> dict[str, A
                     enriched_dataset = session.get(EnrichedDataset, record_info["id"])
                     if enriched_dataset:
                         session.delete(enriched_dataset)
-                        session.commit()
+                        # Let context manager commit
                         results["records_deleted"].append({
                             "type": "EnrichedDataset",
                             "id": record_info["id"],
@@ -190,7 +190,7 @@ def cleanup_orphaned_data(session: Session, dry_run: bool = True) -> dict[str, A
                         logger.info(f"Deleted orphaned enriched dataset record: {record_info['name']}")
                 except Exception as e:
                     logger.warning(f"Failed to delete orphaned record {record_info['id']}: {e}")
-                    session.rollback()
+                    # Rollback will happen in context manager
             else:
                 results["records_deleted"].append({
                     "type": "EnrichedDataset",
@@ -204,12 +204,12 @@ def cleanup_orphaned_data(session: Session, dry_run: bool = True) -> dict[str, A
                 try:
                     quoted_table = quote_identifier(table_name)
                     session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                    session.commit()
+                    # DDL operations auto-commit in SQLite
                     results["tables_dropped"].append(table_name)
                     logger.info(f"Dropped orphaned knowledge table: {table_name}")
                 except Exception as e:
                     logger.warning(f"Failed to drop orphaned table {table_name}: {e}")
-                    session.rollback()
+                    # Rollback will happen in context manager
             else:
                 results["tables_dropped"].append(table_name)
         
@@ -219,12 +219,12 @@ def cleanup_orphaned_data(session: Session, dry_run: bool = True) -> dict[str, A
                 try:
                     quoted_table = quote_identifier(table_name)
                     session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                    session.commit()
+                    # DDL operations auto-commit in SQLite
                     results["tables_dropped"].append(table_name)
                     logger.warning(f"Dropped orphaned dataset table: {table_name} (verify this is correct)")
                 except Exception as e:
                     logger.warning(f"Failed to drop orphaned table {table_name}: {e}")
-                    session.rollback()
+                    # Rollback will happen in context manager
             else:
                 results["tables_dropped"].append(table_name)
         
@@ -235,7 +235,7 @@ def cleanup_orphaned_data(session: Session, dry_run: bool = True) -> dict[str, A
         )
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to cleanup orphaned data: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to cleanup orphaned data: {e}",

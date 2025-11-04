@@ -31,19 +31,33 @@ def temp_db_path() -> Generator[Path, None, None]:
 @pytest.fixture
 def test_engine(temp_db_path: Path):
     """Create a test database engine."""
+    from sqlalchemy.pool import StaticPool
+    
     database_url = f"sqlite:///{temp_db_path}"
     engine = create_engine(
         database_url,
-        connect_args={"check_same_thread": False},
+        connect_args={
+            "check_same_thread": False,
+            "timeout": 30.0,  # Increased timeout for Windows
+            "isolation_level": None,  # Let SQLite handle transactions
+        },
+        poolclass=StaticPool,  # Single connection per thread for Windows compatibility
         echo=False,
-        pool_pre_ping=True,
+        pool_pre_ping=False,  # Not needed for SQLite
     )
     
-    # Enable foreign key constraints
+    # Enable foreign key constraints and WAL mode (match production setup)
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_conn, connection_record):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        # Enable WAL mode to match production configuration
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA cache_size=-64000")
+        # Set busy timeout for Windows
+        cursor.execute("PRAGMA busy_timeout=30000")  # 30 seconds in milliseconds
         cursor.close()
     
     # Create tables
@@ -52,12 +66,14 @@ def test_engine(temp_db_path: Path):
     yield engine
     
     # Cleanup - properly close all connections
+    # Close all connections before dropping tables to avoid locks
+    engine.pool.dispose()
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
     
-    # Wait a bit for Windows to release file lock
+    # Wait longer for Windows to release file lock
     import time
-    time.sleep(0.1)
+    time.sleep(0.5)  # Increased wait time for Windows
 
 
 @pytest.fixture

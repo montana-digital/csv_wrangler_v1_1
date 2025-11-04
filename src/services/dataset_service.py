@@ -207,7 +207,7 @@ def initialize_dataset(
         )
 
         session.add(dataset)
-        session.commit()
+        session.flush()  # Flush to get ID, but let context manager commit
         session.refresh(dataset)
 
         logger.info(f"Initialized dataset '{name}' in slot {slot_number}")
@@ -215,16 +215,17 @@ def initialize_dataset(
         return dataset
 
     except IntegrityError as e:
-        session.rollback()
-        # Clean up orphaned table if it was created
+        # Clean up orphaned table if it was created (before rollback)
+        # Note: DDL operations in SQLite are auto-committed, so this will succeed
         if table_created:
             try:
                 quoted_table = quote_identifier(table_name)
                 session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                session.commit()
+                # DDL operations auto-commit in SQLite, so we don't need explicit commit
                 logger.warning(f"Cleaned up orphaned table {table_name} after IntegrityError")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
+        # Rollback will happen in context manager
         
         # Convert to ValidationError with clear message
         context = {
@@ -235,16 +236,17 @@ def initialize_dataset(
         raise handle_integrity_error(e, context) from e
 
     except Exception as e:
-        session.rollback()
-        # Clean up orphaned table if it was created
+        # Clean up orphaned table if it was created (before rollback)
+        # Note: DDL operations in SQLite are auto-committed, so this will succeed
         if table_created:
             try:
                 quoted_table = quote_identifier(table_name)
                 session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                session.commit()
+                # DDL operations auto-commit in SQLite, so we don't need explicit commit
                 logger.warning(f"Cleaned up orphaned table {table_name} after error")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
+        # Rollback will happen in context manager
         
         logger.error(f"Failed to initialize dataset: {e}", exc_info=True)
         raise DatabaseError(f"Failed to initialize dataset: {e}", operation="initialize_dataset") from e
@@ -378,7 +380,7 @@ def upload_csv_to_dataset(
         # Update dataset's updated_at timestamp
         dataset.updated_at = datetime.now()
         
-        session.commit()
+        session.flush()  # Flush changes, but let context manager commit
         session.refresh(upload_log)
         session.refresh(dataset)
 
@@ -525,15 +527,16 @@ def delete_dataset(
         # Drop source table
         quoted_source_table = quote_identifier(table_name)
         session.execute(text(f"DROP TABLE IF EXISTS {quoted_source_table}"))
+        # DDL operations auto-commit in SQLite
 
         # Delete dataset config (cascade will delete upload logs and EnrichedDataset records)
         session.delete(dataset)
-        session.commit()
+        # Let context manager commit
 
         logger.info(f"Deleted dataset {dataset_id} and table {table_name}")
 
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to delete dataset: {e}", exc_info=True)
         raise DatabaseError(f"Failed to delete dataset: {e}", operation="delete_dataset") from e
 

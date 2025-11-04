@@ -47,12 +47,11 @@ class DatasetRepository:
         """
         try:
             self.session.add(dataset)
-            self.session.commit()
+            self.session.flush()  # Flush to get ID, but don't commit
             self.session.refresh(dataset)
             logger.debug(f"Created dataset: {dataset.name}")
             return dataset
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "Dataset name",
                 "slot_number": "Slot number",
@@ -60,7 +59,6 @@ class DatasetRepository:
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to create dataset: {e}", exc_info=True)
             raise DatabaseError(f"Failed to create dataset: {e}", operation="create_dataset") from e
 
@@ -132,12 +130,11 @@ class DatasetRepository:
             DatabaseError: If update fails
         """
         try:
-            self.session.commit()
+            self.session.flush()  # Flush changes, but don't commit
             self.session.refresh(dataset)
             logger.debug(f"Updated dataset: {dataset.name}")
             return dataset
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "Dataset name",
                 "slot_number": "Slot number",
@@ -145,7 +142,6 @@ class DatasetRepository:
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to update dataset: {e}", exc_info=True)
             raise DatabaseError(f"Failed to update dataset: {e}", operation="update_dataset") from e
 
@@ -166,10 +162,8 @@ class DatasetRepository:
 
         try:
             self.session.delete(dataset)
-            self.session.commit()
             logger.debug(f"Deleted dataset: {dataset_id}")
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to delete dataset: {e}", exc_info=True)
             raise DatabaseError(f"Failed to delete dataset: {e}", operation="delete_dataset") from e
 
@@ -197,19 +191,17 @@ class UploadLogRepository:
         """
         try:
             self.session.add(upload_log)
-            self.session.commit()
+            self.session.flush()  # Flush to get ID, but don't commit
             self.session.refresh(upload_log)
             logger.debug(f"Created upload log: {upload_log.filename}")
             return upload_log
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "filename": "Filename",
                 "dataset_id": "Dataset ID",
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to create upload log: {e}", exc_info=True)
             raise DatabaseError(f"Failed to create upload log: {e}", operation="create_upload_log") from e
 
@@ -285,19 +277,17 @@ class UserProfileRepository:
         """
         try:
             self.session.add(profile)
-            self.session.commit()
+            self.session.flush()  # Flush to get ID, but don't commit
             self.session.refresh(profile)
             logger.debug(f"Created user profile: {profile.name}")
             return profile
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "User name",
                 "logo_path": "Logo path",
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to create user profile: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to create user profile: {e}", operation="create_profile"
@@ -339,19 +329,17 @@ class UserProfileRepository:
             DatabaseError: If update fails
         """
         try:
-            self.session.commit()
+            self.session.flush()  # Flush changes, but don't commit
             self.session.refresh(profile)
             logger.debug(f"Updated user profile: {profile.name}")
             return profile
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "User name",
                 "logo_path": "Logo path",
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to update user profile: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to update user profile: {e}", operation="update_profile"
@@ -390,16 +378,14 @@ class NoteRepository:
         """
         try:
             self.session.add(note)
-            self.session.commit()
+            self.session.flush()  # Flush to get ID, but don't commit
             self.session.refresh(note)
             logger.debug(f"Created note: ID {note.id}")
             return note
         except IntegrityError as e:
-            self.session.rollback()
             context = {}
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to create note: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to create note: {e}", operation="create_note"
@@ -444,7 +430,6 @@ class NoteRepository:
             note = self.session.get(Note, note_id)
             if note:
                 self.session.delete(note)
-                self.session.commit()
                 logger.debug(f"Deleted note: ID {note_id}")
             else:
                 raise ValidationError(
@@ -455,7 +440,6 @@ class NoteRepository:
         except ValidationError:
             raise
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to delete note: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to delete note: {e}", operation="delete_note"
@@ -485,12 +469,11 @@ class DataAnalysisRepository:
         """
         try:
             self.session.add(analysis)
-            self.session.commit()
+            self.session.flush()  # Flush to get ID, but don't commit
             self.session.refresh(analysis)
             logger.debug(f"Created data analysis: ID {analysis.id}")
             return analysis
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "Analysis name",
                 "source_dataset_id": "Source dataset ID",
@@ -498,7 +481,6 @@ class DataAnalysisRepository:
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to create data analysis: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to create data analysis: {e}", operation="create_analysis"
@@ -561,12 +543,11 @@ class DataAnalysisRepository:
             DatabaseError: If update fails
         """
         try:
-            self.session.commit()
+            self.session.flush()  # Flush changes, but don't commit
             self.session.refresh(analysis)
             logger.debug(f"Updated data analysis: ID {analysis.id}")
             return analysis
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "Analysis name",
                 "source_dataset_id": "Source dataset ID",
@@ -574,7 +555,6 @@ class DataAnalysisRepository:
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to update data analysis: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to update data analysis: {e}", operation="update_analysis"
@@ -594,7 +574,6 @@ class DataAnalysisRepository:
             analysis = self.session.get(DataAnalysis, analysis_id)
             if analysis:
                 self.session.delete(analysis)
-                self.session.commit()
                 logger.debug(f"Deleted data analysis: ID {analysis_id}")
             else:
                 raise ValidationError(
@@ -605,7 +584,6 @@ class DataAnalysisRepository:
         except ValidationError:
             raise
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to delete data analysis: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to delete data analysis: {e}", operation="delete_analysis"
@@ -635,19 +613,17 @@ class KnowledgeTableRepository:
         """
         try:
             self.session.add(knowledge_table)
-            self.session.commit()
+            self.session.flush()  # Flush to get ID, but don't commit
             self.session.refresh(knowledge_table)
             logger.debug(f"Created Knowledge Table: {knowledge_table.name}")
             return knowledge_table
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "Knowledge Table name",
                 "table_name": "Table name",
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to create Knowledge Table: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to create Knowledge Table: {e}", operation="create_knowledge_table"
@@ -742,19 +718,17 @@ class KnowledgeTableRepository:
             DatabaseError: If update fails
         """
         try:
-            self.session.commit()
+            self.session.flush()  # Flush changes, but don't commit
             self.session.refresh(knowledge_table)
             logger.debug(f"Updated Knowledge Table: {knowledge_table.name}")
             return knowledge_table
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "Knowledge Table name",
                 "table_name": "Table name",
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to update Knowledge Table: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to update Knowledge Table: {e}", operation="update_knowledge_table"
@@ -781,10 +755,8 @@ class KnowledgeTableRepository:
 
         try:
             self.session.delete(knowledge_table)
-            self.session.commit()
             logger.debug(f"Deleted Knowledge Table: {knowledge_table_id}")
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to delete Knowledge Table: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to delete Knowledge Table: {e}", operation="delete_knowledge_table"
@@ -814,12 +786,11 @@ class EnrichedDatasetRepository:
         """
         try:
             self.session.add(enriched_dataset)
-            self.session.commit()
+            self.session.flush()  # Flush to get ID, but don't commit
             self.session.refresh(enriched_dataset)
             logger.debug(f"Created enriched dataset: {enriched_dataset.name}")
             return enriched_dataset
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "Enriched dataset name",
                 "enriched_table_name": "Enriched table name",
@@ -827,7 +798,6 @@ class EnrichedDatasetRepository:
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to create enriched dataset: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to create enriched dataset: {e}", operation="create_enriched_dataset"
@@ -922,12 +892,11 @@ class EnrichedDatasetRepository:
             DatabaseError: If update fails
         """
         try:
-            self.session.commit()
+            self.session.flush()  # Flush changes, but don't commit
             self.session.refresh(enriched_dataset)
             logger.debug(f"Updated enriched dataset: {enriched_dataset.name}")
             return enriched_dataset
         except IntegrityError as e:
-            self.session.rollback()
             context = {
                 "name": "Enriched dataset name",
                 "enriched_table_name": "Enriched table name",
@@ -935,7 +904,6 @@ class EnrichedDatasetRepository:
             }
             raise handle_integrity_error(e, context) from e
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to update enriched dataset: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to update enriched dataset: {e}", operation="update_enriched_dataset"
@@ -962,10 +930,8 @@ class EnrichedDatasetRepository:
 
         try:
             self.session.delete(enriched_dataset)
-            self.session.commit()
             logger.debug(f"Deleted enriched dataset: {enriched_dataset_id}")
         except Exception as e:
-            self.session.rollback()
             logger.error(f"Failed to delete enriched dataset: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to delete enriched dataset: {e}", operation="delete_enriched_dataset"

@@ -281,10 +281,11 @@ def table_exists(session, table_name: str) -> bool:
         inspector = inspect(session.bind)
         return table_name in inspector.get_table_names()
     except Exception:
-        # Fallback: query sqlite_master directly
+        # Fallback: query sqlite_master directly using parameterized query
         try:
             result = session.execute(
-                text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name.replace("'", "''")}'")
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name=:table_name"),
+                {"table_name": table_name}
             )
             return result.fetchone() is not None
         except Exception:

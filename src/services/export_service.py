@@ -69,6 +69,7 @@ def export_dataset_to_csv(
     output_path: Path,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    include_image_columns: bool = False,
 ) -> Path:
     """
     Export dataset to CSV file with optional date filtering.
@@ -79,6 +80,7 @@ def export_dataset_to_csv(
         output_path: Path where CSV should be saved
         start_date: Optional start date for filtering
         end_date: Optional end date for filtering
+        include_image_columns: Whether to include image columns (default False for performance)
         
     Returns:
         Path to exported CSV file
@@ -94,32 +96,18 @@ def export_dataset_to_csv(
         raise ValidationError(f"Dataset with ID {dataset_id} not found")
 
     try:
-        # Load all data from table
-        from sqlalchemy import text
+        # Use dataframe_service to load data (excludes image columns by default for performance)
+        from src.services.dataframe_service import load_dataset_dataframe
 
-        # Quote table name for safety
-        quoted_table = quote_identifier(dataset.table_name)
-        query = text(f"SELECT * FROM {quoted_table}")
-        result = session.execute(query)
-        rows = result.fetchall()
-
-        # Convert to DataFrame
-        if len(rows) == 0:
-            from src.config.settings import UNIQUE_ID_COLUMN_NAME
-            # Filter out unique_id from columns_config if it exists (legacy data)
-            if not dataset.columns_config:
-                raise ValidationError(
-                    f"Dataset {dataset_id} has invalid columns_config (None or empty)",
-                    field="columns_config",
-                    value=dataset_id,
-                )
-            config_columns = [
-                col for col in dataset.columns_config.keys() 
-                if col != "unique_id" and col != UNIQUE_ID_COLUMN_NAME
-            ]
-            df = pd.DataFrame(columns=config_columns + [UNIQUE_ID_COLUMN_NAME])
-        else:
-            df = pd.DataFrame(rows, columns=result.keys())
+        # Load data with image column exclusion
+        df = load_dataset_dataframe(
+            session=session,
+            dataset_id=dataset_id,
+            limit=100000000,  # Very large limit to get all data
+            offset=0,
+            include_image_columns=include_image_columns,
+            order_by_recent=False,  # No need to order for export
+        )
 
         # Filter by date range if provided
         if start_date is not None or end_date is not None:
@@ -155,6 +143,7 @@ def export_dataset_to_pickle(
     output_path: Path,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    include_image_columns: bool = False,
 ) -> Path:
     """
     Export dataset to Pickle file with optional date filtering.
@@ -165,6 +154,7 @@ def export_dataset_to_pickle(
         output_path: Path where Pickle file should be saved
         start_date: Optional start date for filtering
         end_date: Optional end date for filtering
+        include_image_columns: Whether to include image columns (default False for performance)
         
     Returns:
         Path to exported Pickle file
@@ -182,32 +172,18 @@ def export_dataset_to_pickle(
         raise ValidationError(f"Dataset with ID {dataset_id} not found")
 
     try:
-        # Load all data from table
-        from sqlalchemy import text
+        # Use dataframe_service to load data (excludes image columns by default for performance)
+        from src.services.dataframe_service import load_dataset_dataframe
 
-        # Quote table name for safety
-        quoted_table = quote_identifier(dataset.table_name)
-        query = text(f"SELECT * FROM {quoted_table}")
-        result = session.execute(query)
-        rows = result.fetchall()
-
-        # Convert to DataFrame
-        if len(rows) == 0:
-            from src.config.settings import UNIQUE_ID_COLUMN_NAME
-            # Filter out unique_id from columns_config if it exists (legacy data)
-            if not dataset.columns_config:
-                raise ValidationError(
-                    f"Dataset {dataset_id} has invalid columns_config (None or empty)",
-                    field="columns_config",
-                    value=dataset_id,
-                )
-            config_columns = [
-                col for col in dataset.columns_config.keys() 
-                if col != "unique_id" and col != UNIQUE_ID_COLUMN_NAME
-            ]
-            df = pd.DataFrame(columns=config_columns + [UNIQUE_ID_COLUMN_NAME])
-        else:
-            df = pd.DataFrame(rows, columns=result.keys())
+        # Load data with image column exclusion
+        df = load_dataset_dataframe(
+            session=session,
+            dataset_id=dataset_id,
+            limit=100000000,  # Very large limit to get all data
+            offset=0,
+            include_image_columns=include_image_columns,
+            order_by_recent=False,  # No need to order for export
+        )
 
         # Filter by date range if provided
         if start_date is not None or end_date is not None:

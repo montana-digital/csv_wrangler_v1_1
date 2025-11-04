@@ -135,7 +135,7 @@ def copy_table_data(
         result = session.execute(query)
         rows_copied = result.rowcount
         
-        session.commit()
+        # Let context manager commit
         
         logger.info(
             f"Copied {rows_copied} rows from {source_table_name} to {target_table_name}"
@@ -144,7 +144,7 @@ def copy_table_data(
         return rows_copied
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to copy table data: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to copy table data: {e}", operation="copy_table_data"
@@ -194,12 +194,12 @@ def add_column_to_table(
             f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_column} {column_type}"
         )
         session.execute(query)
-        session.commit()
+        # DDL operations auto-commit in SQLite, but let context manager handle transaction
         
         logger.info(f"Added column {column_name} ({column_type}) to table {table_name}")
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to add column: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to add column: {e}", operation="add_column_to_table"
@@ -267,12 +267,12 @@ def create_index_on_column(
             )
         
         session.execute(query)
-        session.commit()
+        # DDL operations auto-commit in SQLite, but let context manager handle transaction
         
         logger.info(f"Created index {index_name} on {table_name}({column_name})")
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to create index: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to create index: {e}", operation="create_index_on_column"
@@ -396,14 +396,14 @@ def insert_dataframe_to_table(
             method="multi",
         )
         
-        session.commit()
+        # Let context manager commit
         
         logger.info(f"Inserted {rows_inserted} rows into {table_name}")
         
         return rows_inserted
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to insert DataFrame: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to insert DataFrame: {e}", operation="insert_dataframe_to_table"
@@ -448,30 +448,28 @@ def update_enriched_column_values(
             unique_id = row[unique_id_column]
             enriched_value = row[column_name]
             
-            # Handle None/NaN values
-            if pd.isna(enriched_value):
-                value_str = "NULL"
-            else:
-                # Escape single quotes in value
-                value_str = f"'{str(enriched_value).replace("'", "''")}'"
-            
-            # Escape single quotes in unique_id
-            unique_id_escaped = str(unique_id).replace("'", "''")
+            # Use parameterized query for values to prevent SQL injection
             query = text(
-                f"UPDATE {quoted_table} SET {quoted_column} = {value_str} "
-                f"WHERE {quoted_unique_id} = '{unique_id_escaped}'"
+                f"UPDATE {quoted_table} SET {quoted_column} = :enriched_value "
+                f"WHERE {quoted_unique_id} = :unique_id"
             )
-            result = session.execute(query)
+            result = session.execute(
+                query,
+                {
+                    "enriched_value": enriched_value if not pd.isna(enriched_value) else None,
+                    "unique_id": unique_id
+                }
+            )
             updated_count += result.rowcount
         
-        session.commit()
+        # Let context manager commit
         
         logger.info(f"Updated {updated_count} rows in {table_name}.{column_name}")
         
         return updated_count
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to update enriched values: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to update enriched values: {e}",

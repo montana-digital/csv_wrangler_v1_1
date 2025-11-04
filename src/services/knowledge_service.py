@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
@@ -188,7 +189,8 @@ def initialize_knowledge_table(
         current_name = f"{base_table_name}_v1"
         # For sqlite_master queries, table name is a string literal, not identifier
         while session.execute(
-            text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{current_name.replace("'", "''")}'")
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name=:table_name"),
+            {"table_name": current_name}
         ).fetchone():
             counter += 1
             current_name = f"{base_table_name}_v{counter}"
@@ -254,7 +256,7 @@ def initialize_knowledge_table(
         # Create indexes for performance
         session.execute(text(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_key_id ON {table_name}(Key_ID)"))
         session.execute(text(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_created_at ON {table_name}(created_at)"))
-        session.commit()
+        # DDL operations auto-commit in SQLite, but let context manager handle transaction
         
         logger.info(f"Created Knowledge Table {table_name} for '{name}'")
         
@@ -288,15 +290,13 @@ def initialize_knowledge_table(
         return knowledge_table
         
     except IntegrityError as e:
-        # Rollback any uncommitted changes
-        session.rollback()
-        
-        # Clean up orphaned table if it was created
+        # Clean up orphaned table if it was created (before rollback)
+        # Note: DDL operations in SQLite are auto-committed, so this will succeed
         if table_created:
             try:
                 quoted_table = quote_identifier(table_name)
                 session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                session.commit()
+                # DDL operations auto-commit in SQLite
                 logger.warning(f"Cleaned up orphaned Knowledge Table {table_name} after IntegrityError")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
@@ -315,7 +315,7 @@ def initialize_knowledge_table(
                 # Quote table name for safety
                 quoted_table = quote_identifier(table_name)
                 session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                session.commit()
+                # DDL operations auto-commit in SQLite
                 logger.warning(f"Cleaned up orphaned Knowledge Table {table_name} after error")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
@@ -646,7 +646,7 @@ def delete_knowledge_table(session: Session, knowledge_table_id: int) -> None:
         # Drop database table - quote table name for safety
         quoted_table = quote_identifier(table_name)
         session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-        session.commit()
+        # DDL operations auto-commit in SQLite
         logger.info(f"Dropped Knowledge Table: {table_name}")
         
         # Delete KnowledgeTable record
@@ -655,7 +655,7 @@ def delete_knowledge_table(session: Session, knowledge_table_id: int) -> None:
         logger.info(f"Deleted Knowledge Table: {knowledge_table.name} (ID: {knowledge_table_id})")
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to delete Knowledge Table: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to delete Knowledge Table: {e}",

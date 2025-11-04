@@ -26,7 +26,7 @@ CHUNK_SIZE: Final[int] = 10000  # Rows per chunk for large file processing
 
 # Database configuration
 SQLITE_CHECK_SAME_THREAD: Final[bool] = False
-SQLITE_TIMEOUT: Final[float] = 20.0  # seconds
+SQLITE_TIMEOUT: Final[float] = 30.0  # seconds - increased for Windows file locking issues
 
 # UUID Value configuration
 UNIQUE_ID_COLUMN_NAME: Final[str] = "uuid_value"

@@ -43,21 +43,43 @@ def get_engine() -> Engine:
             database_url = get_database_url()
 
             # Create engine with SQLite-specific configuration
-            # Note: pool_pre_ping is not needed for SQLite (file-based connections are lightweight)
+            # Use StaticPool for Windows to avoid connection issues
+            # StaticPool maintains a single connection per thread, better for Windows file locking
+            from sqlalchemy.pool import StaticPool
+            
             _engine = create_engine(
                 database_url,
                 connect_args={
                     "check_same_thread": SQLITE_CHECK_SAME_THREAD,
                     "timeout": SQLITE_TIMEOUT,
+                    # Windows-specific: explicitly set isolation level for better locking
+                    "isolation_level": None,  # Let SQLite handle transactions
                 },
+                poolclass=StaticPool,  # Single connection per thread for Windows
+                pool_pre_ping=False,  # Not needed for SQLite
                 echo=False,  # Set to True for SQL debugging
             )
 
-            # Enable foreign key constraints for SQLite
+            # Enable foreign key constraints and optimize SQLite settings
             @event.listens_for(_engine, "connect")
             def set_sqlite_pragma(dbapi_conn, connection_record):
                 cursor = dbapi_conn.cursor()
+                # Enable foreign key constraints
                 cursor.execute("PRAGMA foreign_keys=ON")
+                # Enable WAL mode for better concurrent access
+                # Note: WAL mode can have issues on Windows with network-synced paths (OneDrive)
+                # but it's still better than DELETE mode for concurrency
+                cursor.execute("PRAGMA journal_mode=WAL")
+                # Optimize synchronous mode for better performance with WAL
+                # NORMAL is safe with WAL and provides good performance
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                # Use memory for temporary tables (improves performance)
+                cursor.execute("PRAGMA temp_store=MEMORY")
+                # Increase page cache size for better performance (default is -2000, set to -64000 = 64MB)
+                cursor.execute("PRAGMA cache_size=-64000")
+                # Windows-specific: Set busy timeout to handle concurrent access better
+                # This helps when multiple operations happen quickly
+                cursor.execute(f"PRAGMA busy_timeout={int(SQLITE_TIMEOUT * 1000)}")  # Convert to milliseconds
                 cursor.close()
 
             logger.info("Database engine created successfully")
@@ -114,7 +136,10 @@ def get_session() -> Generator[Session, None, None]:
         logger.error(f"Database session error: {e}", exc_info=True)
         raise
     finally:
+        # Explicitly close session and ensure connection is returned to pool
         session.close()
+        # Note: StaticPool will handle connection cleanup automatically
+        # No need to dispose the engine here as it's shared
 
 
 def migrate_database() -> None:

@@ -126,7 +126,8 @@ def create_enriched_dataset(
         current_name = f"enriched_{source_dataset.table_name}_v1"
         # For sqlite_master queries, table name is a string literal, not identifier
         while session.execute(
-            text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{current_name.replace("'", "''")}'")
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name=:table_name"),
+            {"table_name": current_name}
         ).fetchone():
             counter += 1
             current_name = f"enriched_{source_dataset.table_name}_v{counter}"
@@ -249,7 +250,7 @@ def create_enriched_dataset(
         )
         
         session.add(enriched_dataset)
-        session.commit()
+        session.flush()  # Flush to get ID, but let context manager commit
         session.refresh(enriched_dataset)
         
         logger.info(
@@ -260,10 +261,8 @@ def create_enriched_dataset(
         return enriched_dataset
         
     except IntegrityError as e:
-        # Rollback any uncommitted changes
-        session.rollback()
-        
-        # Try to clean up partially created table if EnrichedDataset record wasn't created
+        # Clean up orphaned table if it was created (before rollback)
+        # Note: DDL operations in SQLite are auto-committed, so this will succeed
         try:
             from src.utils.validation import table_exists, quote_identifier
             if table_exists(session, enriched_table_name):
@@ -275,7 +274,7 @@ def create_enriched_dataset(
                     # Orphaned table - drop it
                     quoted_table = quote_identifier(enriched_table_name)
                     session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                    session.commit()
+                    # DDL operations auto-commit in SQLite
                     logger.warning(f"Cleaned up orphaned enriched table {enriched_table_name}")
         except Exception as cleanup_error:
             logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
@@ -288,11 +287,8 @@ def create_enriched_dataset(
         raise handle_integrity_error(e, context) from e
         
     except Exception as e:
-        # Rollback any uncommitted changes
-        session.rollback()
-        
-        # Try to clean up partially created table if EnrichedDataset record wasn't created
-        # (table operations above may have already committed, so we can't fully rollback)
+        # Clean up orphaned table if it was created (before rollback)
+        # Note: DDL operations in SQLite are auto-committed, so this will succeed
         try:
             from src.utils.validation import table_exists, quote_identifier
             if table_exists(session, enriched_table_name):
@@ -304,7 +300,7 @@ def create_enriched_dataset(
                     # Orphaned table - drop it
                     quoted_table = quote_identifier(enriched_table_name)
                     session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
-                    session.commit()
+                    # DDL operations auto-commit in SQLite
                     logger.warning(f"Cleaned up orphaned enriched table {enriched_table_name}")
         except Exception as cleanup_error:
             logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
@@ -372,7 +368,7 @@ def sync_enriched_dataset(
         if new_rows_df.empty:
             logger.info(f"No new rows to sync for enriched dataset {enriched_dataset_id}")
             enriched_dataset.last_sync_date = datetime.now()
-            session.commit()
+            # Let context manager commit
             return 0
         
         # Insert new rows into enriched table (without enriched columns yet)
@@ -428,7 +424,7 @@ def sync_enriched_dataset(
         
         # Update last sync date
         enriched_dataset.last_sync_date = datetime.now()
-        session.commit()
+        # Let context manager commit
         
         logger.info(
             f"Synced {rows_synced} new rows to enriched dataset {enriched_dataset_id}"
@@ -437,7 +433,7 @@ def sync_enriched_dataset(
         return rows_synced
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to sync enriched dataset: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to sync enriched dataset: {e}", operation="sync_enriched_dataset"
@@ -527,15 +523,16 @@ def delete_enriched_dataset(
         table_name = enriched_dataset.enriched_table_name
         quoted_table = quote_identifier(table_name)
         session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
+        # DDL operations auto-commit in SQLite
         
         # Delete the record (cascade will handle relationships)
         session.delete(enriched_dataset)
-        session.commit()
+        # Let context manager commit
         
         logger.info(f"Deleted enriched dataset {enriched_dataset_id} and table {table_name}")
         
     except Exception as e:
-        session.rollback()
+        # Rollback will happen in context manager
         logger.error(f"Failed to delete enriched dataset: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to delete enriched dataset: {e}", operation="delete_enriched_dataset"
