@@ -14,6 +14,7 @@ from src.database.models import DatasetConfig
 from src.database.repository import DatasetRepository
 from src.utils.errors import DatabaseError, ValidationError
 from src.utils.logging_config import get_logger
+from src.utils.validation import quote_identifier
 
 logger = get_logger(__name__)
 
@@ -96,7 +97,9 @@ def export_dataset_to_csv(
         # Load all data from table
         from sqlalchemy import text
 
-        query = text(f"SELECT * FROM {dataset.table_name}")
+        # Quote table name for safety
+        quoted_table = quote_identifier(dataset.table_name)
+        query = text(f"SELECT * FROM {quoted_table}")
         result = session.execute(query)
         rows = result.fetchall()
 
@@ -104,6 +107,12 @@ def export_dataset_to_csv(
         if len(rows) == 0:
             from src.config.settings import UNIQUE_ID_COLUMN_NAME
             # Filter out unique_id from columns_config if it exists (legacy data)
+            if not dataset.columns_config:
+                raise ValidationError(
+                    f"Dataset {dataset_id} has invalid columns_config (None or empty)",
+                    field="columns_config",
+                    value=dataset_id,
+                )
             config_columns = [
                 col for col in dataset.columns_config.keys() 
                 if col != "unique_id" and col != UNIQUE_ID_COLUMN_NAME
@@ -176,7 +185,9 @@ def export_dataset_to_pickle(
         # Load all data from table
         from sqlalchemy import text
 
-        query = text(f"SELECT * FROM {dataset.table_name}")
+        # Quote table name for safety
+        quoted_table = quote_identifier(dataset.table_name)
+        query = text(f"SELECT * FROM {quoted_table}")
         result = session.execute(query)
         rows = result.fetchall()
 
@@ -184,6 +195,12 @@ def export_dataset_to_pickle(
         if len(rows) == 0:
             from src.config.settings import UNIQUE_ID_COLUMN_NAME
             # Filter out unique_id from columns_config if it exists (legacy data)
+            if not dataset.columns_config:
+                raise ValidationError(
+                    f"Dataset {dataset_id} has invalid columns_config (None or empty)",
+                    field="columns_config",
+                    value=dataset_id,
+                )
             config_columns = [
                 col for col in dataset.columns_config.keys() 
                 if col != "unique_id" and col != UNIQUE_ID_COLUMN_NAME

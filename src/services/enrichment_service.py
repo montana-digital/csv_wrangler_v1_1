@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import pandas as pd
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.config.settings import UNIQUE_ID_COLUMN_NAME
@@ -24,6 +25,14 @@ from src.services.table_service import (
 )
 from src.utils.errors import DatabaseError, ValidationError
 from src.utils.logging_config import get_logger
+from src.utils.validation import (
+    handle_integrity_error,
+    quote_identifier,
+    sanitize_column_name,
+    validate_enrichment_config,
+    validate_foreign_key,
+    validate_string_length,
+)
 
 logger = get_logger(__name__)
 
@@ -53,14 +62,17 @@ def create_enriched_dataset(
         ValidationError: If source dataset not found or invalid config
         DatabaseError: If enrichment creation fails
     """
-    # Get source dataset
-    source_dataset = session.get(DatasetConfig, source_dataset_id)
-    if not source_dataset:
-        raise ValidationError(f"Source dataset with ID {source_dataset_id} not found")
+    # Validate foreign key
+    validate_foreign_key(session, DatasetConfig, source_dataset_id, "source_dataset_id")
     
-    # Validate enrichment config
-    if not enrichment_config:
-        raise ValidationError("Enrichment config cannot be empty")
+    # Get source dataset (now guaranteed to exist)
+    source_dataset = session.get(DatasetConfig, source_dataset_id)
+    
+    # Validate string lengths
+    name = validate_string_length(name, 255, "Enriched dataset name")
+    
+    # Validate enrichment config structure and function names
+    enrichment_config = validate_enrichment_config(enrichment_config)
     
     # Get actual table columns from database (more reliable than columns_config)
     inspector = inspect(session.bind)
@@ -70,6 +82,12 @@ def create_enriched_dataset(
         logger.warning(f"Could not inspect table columns, falling back to columns_config: {e}")
         # Fallback to columns_config if inspection fails
         # Filter out unique_id from columns_config if it exists (legacy data)
+        if not source_dataset.columns_config:
+            raise ValidationError(
+                f"Source dataset {source_dataset_id} has invalid columns_config (None or empty) and table inspection failed",
+                field="columns_config",
+                value=source_dataset_id,
+            )
         config_columns = [
             col for col in source_dataset.columns_config.keys() 
             if col != "unique_id" and col != UNIQUE_ID_COLUMN_NAME
@@ -90,26 +108,67 @@ def create_enriched_dataset(
                 f"Column '{col_name}' not found in source dataset table '{source_dataset.table_name}'",
                 field="enrichment_config"
             )
+        
+        # Warn about column names with spaces (will be sanitized for enriched column names)
+        if " " in col_name or "-" in col_name:
+            logger.warning(
+                f"Column name '{col_name}' contains spaces or hyphens. "
+                f"Enriched column name will be sanitized (spaces/hyphens replaced with underscores)."
+            )
     
-    # Generate enriched table name
-    enriched_table_name = f"enriched_{source_dataset.table_name}_v1"
-    # Ensure uniqueness by appending number if needed
-    counter = 1
-    while session.execute(
-        text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{enriched_table_name}'")
-    ).fetchone():
-        counter += 1
-        enriched_table_name = f"enriched_{source_dataset.table_name}_v{counter}"
+    # Generate enriched table name with collision handling
+    # Use retry logic to handle race conditions
+    from src.utils.validation import retry_with_backoff
     
+    def check_and_generate_table_name():
+        """Check if table name exists and generate unique one if needed."""
+        counter = 1
+        current_name = f"enriched_{source_dataset.table_name}_v1"
+        # For sqlite_master queries, table name is a string literal, not identifier
+        while session.execute(
+            text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{current_name.replace("'", "''")}'")
+        ).fetchone():
+            counter += 1
+            current_name = f"enriched_{source_dataset.table_name}_v{counter}"
+            if counter > 100:
+                raise DatabaseError(
+                    f"Unable to generate unique enriched table name after 100 attempts",
+                    operation="create_enriched_dataset"
+                )
+        return current_name
+    
+    # Retry with exponential backoff to handle race conditions
     try:
-        # Step 1: Copy table structure
+        enriched_table_name = retry_with_backoff(
+            check_and_generate_table_name,
+            max_attempts=3,
+            initial_delay=0.1,
+            max_delay=1.0,
+            exceptions=(DatabaseError,),
+        )
+    except DatabaseError:
+        # Re-raise DatabaseError as-is
+        raise
+    except Exception as e:
+        # Wrap other exceptions
+        raise DatabaseError(
+            f"Failed to generate unique table name: {e}",
+            operation="create_enriched_dataset"
+        ) from e
+    
+    # Note: This operation involves multiple commits because helper functions (copy_table_structure,
+    # copy_table_data, add_column_to_table, etc.) commit internally. This is by design for modularity,
+    # but means we can have partial state if the final EnrichedDataset record creation fails.
+    # We handle this by cleaning up orphaned tables in the exception handler below.
+    try:
+        # Step 1: Copy table structure (commits internally)
         copy_table_structure(
             session,
             source_dataset.table_name,
             enriched_table_name,
         )
         
-        # Step 2: Copy existing data
+        # Step 2: Copy existing data (commits internally)
         rows_copied = copy_table_data(
             session,
             source_dataset.table_name,
@@ -117,16 +176,20 @@ def create_enriched_dataset(
         )
         
         # Step 3: Add enriched columns and populate them
+        # Note: These operations commit internally, so partial state is possible
+        # but we handle errors and ensure cleanup
         columns_added = []
         for col_name, function_name in enrichment_config.items():
-            # Generate enriched column name
-            enriched_col_name = f"{col_name}_enriched_{function_name}"
+            # Generate enriched column name - sanitize source column name to ensure valid SQL identifier
+            # This prevents errors with spaces/special characters in source column names
+            sanitized_col_name = sanitize_column_name(col_name)
+            enriched_col_name = f"{sanitized_col_name}_enriched_{function_name}"
             columns_added.append(enriched_col_name)
             
-            # Add column to table
+            # Add column to table (commits internally)
             add_column_to_table(session, enriched_table_name, enriched_col_name, "TEXT")
             
-            # Create index on enriched column for fast search queries
+            # Create index on enriched column for fast search queries (commits internally)
             try:
                 create_index_on_column(
                     session,
@@ -142,8 +205,11 @@ def create_enriched_dataset(
                     f"Table will still function but search may be slower."
                 )
             
-            # Load source column data
-            query = text(f"SELECT {col_name}, {UNIQUE_ID_COLUMN_NAME} FROM {source_dataset.table_name}")
+            # Load source column data - quote identifiers to handle spaces in column names
+            quoted_col_name = quote_identifier(col_name)
+            quoted_unique_id = quote_identifier(UNIQUE_ID_COLUMN_NAME)
+            quoted_source_table = quote_identifier(source_dataset.table_name)
+            query = text(f"SELECT {quoted_col_name}, {quoted_unique_id} FROM {quoted_source_table}")
             result = session.execute(query)
             rows = result.fetchall()
             
@@ -157,7 +223,7 @@ def create_enriched_dataset(
                 # Add enriched values to DataFrame
                 df[enriched_col_name] = enriched_series
                 
-                # Update enriched column values
+                # Update enriched column values (commits internally)
                 update_enriched_column_values(
                     session,
                     enriched_table_name,
@@ -166,11 +232,17 @@ def create_enriched_dataset(
                 )
         
         # Step 4: Create EnrichedDataset record
+        # This is the final commit point - if this fails, we have partial state
+        # but the table operations above have already committed
+        # Validate table name length
+        enriched_table_name = validate_string_length(enriched_table_name, 255, "enriched_table_name", allow_truncate=True)
+        source_table_name = validate_string_length(source_dataset.table_name, 255, "source_table_name", allow_truncate=True)
+        
         enriched_dataset = EnrichedDataset(
             name=name,
             source_dataset_id=source_dataset_id,
             enriched_table_name=enriched_table_name,
-            source_table_name=source_dataset.table_name,
+            source_table_name=source_table_name,
             enrichment_config=enrichment_config,
             columns_added=columns_added,
             last_sync_date=datetime.now(),
@@ -187,8 +259,56 @@ def create_enriched_dataset(
         
         return enriched_dataset
         
-    except Exception as e:
+    except IntegrityError as e:
+        # Rollback any uncommitted changes
         session.rollback()
+        
+        # Try to clean up partially created table if EnrichedDataset record wasn't created
+        try:
+            from src.utils.validation import table_exists, quote_identifier
+            if table_exists(session, enriched_table_name):
+                # Check if EnrichedDataset record exists - if not, table is orphaned
+                existing_enriched = session.query(EnrichedDataset).filter_by(
+                    enriched_table_name=enriched_table_name
+                ).first()
+                if not existing_enriched:
+                    # Orphaned table - drop it
+                    quoted_table = quote_identifier(enriched_table_name)
+                    session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
+                    session.commit()
+                    logger.warning(f"Cleaned up orphaned enriched table {enriched_table_name}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
+        
+        # Convert to ValidationError with clear message
+        context = {
+            "name": "Enriched dataset name",
+            "enriched_table_name": "Enriched table name",
+        }
+        raise handle_integrity_error(e, context) from e
+        
+    except Exception as e:
+        # Rollback any uncommitted changes
+        session.rollback()
+        
+        # Try to clean up partially created table if EnrichedDataset record wasn't created
+        # (table operations above may have already committed, so we can't fully rollback)
+        try:
+            from src.utils.validation import table_exists, quote_identifier
+            if table_exists(session, enriched_table_name):
+                # Check if EnrichedDataset record exists - if not, table is orphaned
+                existing_enriched = session.query(EnrichedDataset).filter_by(
+                    enriched_table_name=enriched_table_name
+                ).first()
+                if not existing_enriched:
+                    # Orphaned table - drop it
+                    quoted_table = quote_identifier(enriched_table_name)
+                    session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
+                    session.commit()
+                    logger.warning(f"Cleaned up orphaned enriched table {enriched_table_name}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
+        
         logger.error(f"Failed to create enriched dataset: {e}", exc_info=True)
         raise DatabaseError(
             f"Failed to create enriched dataset: {e}", operation="create_enriched_dataset"
@@ -219,6 +339,26 @@ def sync_enriched_dataset(
     if not enriched_dataset:
         raise ValidationError(f"Enriched dataset with ID {enriched_dataset_id} not found")
     
+    # Validate that source dataset still exists
+    source_dataset = session.get(DatasetConfig, enriched_dataset.source_dataset_id)
+    if not source_dataset:
+        raise ValidationError(
+            f"Source dataset with ID {enriched_dataset.source_dataset_id} no longer exists. "
+            f"The enriched dataset '{enriched_dataset.name}' is orphaned.",
+            field="source_dataset_id",
+            value=enriched_dataset.source_dataset_id,
+        )
+    
+    # Validate that enriched table still exists
+    from src.utils.validation import table_exists
+    if not table_exists(session, enriched_dataset.enriched_table_name):
+        raise ValidationError(
+            f"Enriched table '{enriched_dataset.enriched_table_name}' no longer exists. "
+            f"The enriched dataset '{enriched_dataset.name}' may have been corrupted.",
+            field="enriched_table_name",
+            value=enriched_dataset.enriched_table_name,
+        )
+    
     try:
         # Get new rows from source
         from src.config.settings import UNIQUE_ID_COLUMN_NAME
@@ -244,8 +384,19 @@ def sync_enriched_dataset(
         
         # Apply enrichment functions to new rows
         rows_synced = len(new_rows_df)
+        
+        # Ensure enrichment_config exists
+        if not enriched_dataset.enrichment_config:
+            raise ValidationError(
+                f"Enriched dataset {enriched_dataset_id} has invalid enrichment_config (None or empty)",
+                field="enrichment_config",
+                value=enriched_dataset_id,
+            )
+        
         for col_name, function_name in enriched_dataset.enrichment_config.items():
-            enriched_col_name = f"{col_name}_enriched_{function_name}"
+            # Sanitize source column name to match enriched column naming convention
+            sanitized_col_name = sanitize_column_name(col_name)
+            enriched_col_name = f"{sanitized_col_name}_enriched_{function_name}"
             
             # Apply enrichment function
             enrichment_func = get_enrichment_function(function_name)
@@ -372,9 +523,10 @@ def delete_enriched_dataset(
         raise ValidationError(f"Enriched dataset with ID {enriched_dataset_id} not found")
     
     try:
-        # Drop the enriched table
+        # Drop the enriched table - quote identifier for safety
         table_name = enriched_dataset.enriched_table_name
-        session.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+        quoted_table = quote_identifier(table_name)
+        session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
         
         # Delete the record (cascade will handle relationships)
         session.delete(enriched_dataset)

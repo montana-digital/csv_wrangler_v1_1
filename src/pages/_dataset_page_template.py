@@ -131,8 +131,10 @@ def render_dataset_page(slot_number: int) -> None:
                 if stats["total_rows"] > 0:
                     # Load recent data
                     from sqlalchemy import text
+                    from src.utils.validation import quote_identifier
 
-                    query = text(f"SELECT * FROM {dataset.table_name} ORDER BY rowid DESC LIMIT 10000")
+                    quoted_table = quote_identifier(dataset.table_name)
+                    query = text(f"SELECT * FROM {quoted_table} ORDER BY rowid DESC LIMIT 10000")
                     result = session.execute(query)
                     rows = result.fetchall()
 

@@ -30,7 +30,14 @@ from src.services.file_import_service import import_file
 from src.services.table_service import insert_dataframe_to_table
 from src.utils.errors import DatabaseError, ValidationError
 from src.utils.logging_config import get_logger
-from src.utils.validation import sanitize_table_name
+from src.utils.validation import (
+    handle_integrity_error,
+    quote_identifier,
+    sanitize_table_name,
+    validate_columns_config,
+    validate_image_columns,
+    validate_string_length,
+)
 
 logger = get_logger(__name__)
 
@@ -132,12 +139,29 @@ def initialize_knowledge_table(
         ValidationError: If name is duplicate or invalid data_type
         DatabaseError: If table creation fails
     """
+    # Validate inputs
+    # Validate string lengths
+    name = validate_string_length(name, 255, "Knowledge Table name")
+    primary_key_column = validate_string_length(primary_key_column, 255, "primary_key_column")
+    
     # Validate data_type
     if data_type not in VALID_DATA_TYPES:
         raise ValidationError(
             f"Invalid data_type: {data_type}. Must be one of {VALID_DATA_TYPES}",
             field="data_type",
             value=data_type,
+        )
+    
+    # Validate JSON structures
+    columns_config = validate_columns_config(columns_config, allow_empty=False)
+    image_columns = validate_image_columns(image_columns, columns_config=columns_config)
+    
+    # Validate primary_key_column exists in columns_config
+    if primary_key_column not in columns_config:
+        raise ValidationError(
+            f"Primary key column '{primary_key_column}' not found in columns_config",
+            field="primary_key_column",
+            value=primary_key_column,
         )
     
     # Check if name is duplicate
@@ -150,31 +174,54 @@ def initialize_knowledge_table(
             value=name,
         )
     
-    # Validate primary_key_column exists in columns_config
-    if primary_key_column not in columns_config:
-        raise ValidationError(
-            f"Primary key column '{primary_key_column}' not found in columns_config",
-            field="primary_key_column",
-            value=primary_key_column,
-        )
-    
     # Generate table name with collision handling
     sanitized_name = sanitize_table_name(name)
     base_table_name = f"knowledge_{data_type}_{sanitized_name}"
     table_name = f"{base_table_name}_v1"
     
-    counter = 1
-    while session.execute(
-        text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
-    ).fetchone():
-        counter += 1
-        table_name = f"{base_table_name}_v{counter}"
-        if counter > 100:
-            raise DatabaseError(
-                f"Unable to generate unique table name for '{name}' after 100 attempts",
-                operation="initialize_knowledge_table",
-            )
+    # Use retry logic to handle race conditions
+    from src.utils.validation import retry_with_backoff
     
+    def check_and_generate_table_name():
+        """Check if table name exists and generate unique one if needed."""
+        counter = 1
+        current_name = f"{base_table_name}_v1"
+        # For sqlite_master queries, table name is a string literal, not identifier
+        while session.execute(
+            text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{current_name.replace("'", "''")}'")
+        ).fetchone():
+            counter += 1
+            current_name = f"{base_table_name}_v{counter}"
+            if counter > 100:
+                raise DatabaseError(
+                    f"Unable to generate unique table name for '{name}' after 100 attempts",
+                    operation="initialize_knowledge_table",
+                )
+        return current_name
+    
+    # Retry with exponential backoff to handle race conditions
+    try:
+        table_name = retry_with_backoff(
+            check_and_generate_table_name,
+            max_attempts=3,
+            initial_delay=0.1,
+            max_delay=1.0,
+            exceptions=(DatabaseError,),
+        )
+    except DatabaseError:
+        # Re-raise DatabaseError as-is
+        raise
+    except Exception as e:
+        # Wrap other exceptions
+        raise DatabaseError(
+            f"Failed to generate unique table name: {e}",
+            operation="initialize_knowledge_table"
+        ) from e
+    
+    # Validate and truncate table name if needed (max 255 chars)
+    table_name = validate_string_length(table_name, 255, "table_name", allow_truncate=True)
+    
+    table_created = False
     try:
         # Create table dynamically
         metadata = MetaData()
@@ -202,6 +249,7 @@ def initialize_knowledge_table(
         
         table = Table(table_name, metadata, *columns)
         metadata.create_all(bind=session.bind)
+        table_created = True
         
         # Create indexes for performance
         session.execute(text(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_key_id ON {table_name}(Key_ID)"))
@@ -239,13 +287,38 @@ def initialize_knowledge_table(
         
         return knowledge_table
         
+    except IntegrityError as e:
+        # Rollback any uncommitted changes
+        session.rollback()
+        
+        # Clean up orphaned table if it was created
+        if table_created:
+            try:
+                quoted_table = quote_identifier(table_name)
+                session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
+                session.commit()
+                logger.warning(f"Cleaned up orphaned Knowledge Table {table_name} after IntegrityError")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
+        
+        # Convert to ValidationError with clear message
+        context = {
+            "name": "Knowledge Table name",
+            "table_name": "Table name",
+        }
+        raise handle_integrity_error(e, context) from e
+        
     except Exception as e:
         # Rollback table creation if KnowledgeTable record creation fails
-        try:
-            session.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
-            session.commit()
-        except:
-            pass
+        if table_created:
+            try:
+                # Quote table name for safety
+                quoted_table = quote_identifier(table_name)
+                session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
+                session.commit()
+                logger.warning(f"Cleaned up orphaned Knowledge Table {table_name} after error")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
         
         if isinstance(e, (ValidationError, DatabaseError)):
             raise
@@ -285,6 +358,12 @@ def upload_to_knowledge_table(
         )
     
     # Validate required columns are present
+    if not knowledge_table.columns_config:
+        raise ValidationError(
+            f"Knowledge Table {knowledge_table_id} has invalid columns_config (None or empty)",
+            field="columns_config",
+            value=knowledge_table_id,
+        )
     required_columns = set(knowledge_table.columns_config.keys())
     upload_columns = set(df.columns)
     
@@ -330,8 +409,11 @@ def upload_to_knowledge_table(
         }
     
     # Check for existing Key_IDs (duplicate detection)
+    from src.utils.validation import quote_identifier
+    quoted_table = quote_identifier(knowledge_table.table_name)
+    quoted_key_id = quote_identifier("Key_ID")
     existing_keys_query = text(
-        f"SELECT DISTINCT Key_ID FROM {knowledge_table.table_name} WHERE Key_ID IS NOT NULL"
+        f"SELECT DISTINCT {quoted_key_id} FROM {quoted_table} WHERE {quoted_key_id} IS NOT NULL"
     )
     existing_keys_result = session.execute(existing_keys_query)
     existing_keys = {row[0] for row in existing_keys_result.fetchall()}
@@ -348,6 +430,12 @@ def upload_to_knowledge_table(
         
         # Select columns that exist in both DataFrame and table
         # Table has: uuid_value (PK), Key_ID, created_at (auto), plus columns from columns_config
+        if not knowledge_table.columns_config:
+            raise ValidationError(
+                f"Knowledge Table {knowledge_table.id} has invalid columns_config (None or empty)",
+                field="columns_config",
+                value=knowledge_table.id,
+            )
         config_columns = list(knowledge_table.columns_config.keys())
         required_columns = config_columns + ["Key_ID", UNIQUE_ID_COLUMN_NAME]
         
@@ -430,6 +518,8 @@ def get_knowledge_table_stats(
     
     for enriched_dataset in matching_enriched:
         # Find enriched columns using matching function
+        if not enriched_dataset.enrichment_config:
+            continue  # Skip if no enrichment config
         matching_columns = [
             col_name
             for col_name, func_name in enriched_dataset.enrichment_config.items()
@@ -439,7 +529,7 @@ def get_knowledge_table_stats(
         for enriched_col in matching_columns:
             enriched_col_name = f"{enriched_col}_enriched_{knowledge_table.data_type}"
             
-            if enriched_col_name in enriched_dataset.columns_added:
+            if enriched_dataset.columns_added and enriched_col_name in enriched_dataset.columns_added:
                 # Query enriched values
                 query = text(
                     f"SELECT DISTINCT uuid_value, {enriched_col_name} "
@@ -471,8 +561,10 @@ def get_knowledge_table_stats(
     top_20 = pd.DataFrame(top_20_data[:20]) if top_20_data else pd.DataFrame(columns=["Key_ID", "count"])
     
     # Recently added (last 20 records)
+    from src.utils.validation import quote_identifier
+    quoted_table = quote_identifier(knowledge_table.table_name)
     recently_query = text(
-        f"SELECT * FROM {knowledge_table.table_name} "
+        f"SELECT * FROM {quoted_table} "
         f"ORDER BY created_at DESC LIMIT 20"
     )
     recently_result = session.execute(recently_query)
@@ -518,7 +610,10 @@ def get_knowledge_table_stats(
 
 def get_existing_key_ids(session: Session, table_name: str) -> set[str]:
     """Get all existing Key_IDs from a Knowledge Table."""
-    query = text(f"SELECT DISTINCT Key_ID FROM {table_name} WHERE Key_ID IS NOT NULL")
+    # Quote identifiers to handle spaces in table/column names
+    quoted_table = quote_identifier(table_name)
+    quoted_key_id = quote_identifier("Key_ID")
+    query = text(f"SELECT DISTINCT {quoted_key_id} FROM {quoted_table} WHERE {quoted_key_id} IS NOT NULL")
     result = session.execute(query)
     return {row[0] for row in result.fetchall()}
 
@@ -548,8 +643,9 @@ def delete_knowledge_table(session: Session, knowledge_table_id: int) -> None:
     table_name = knowledge_table.table_name
     
     try:
-        # Drop database table
-        session.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+        # Drop database table - quote table name for safety
+        quoted_table = quote_identifier(table_name)
+        session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
         session.commit()
         logger.info(f"Dropped Knowledge Table: {table_name}")
         

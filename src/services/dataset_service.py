@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import pandas as pd
 from sqlalchemy import Column, Integer, MetaData, String, Table, Text, create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.config.settings import MAX_DATASET_SLOTS, UNIQUE_ID_COLUMN_NAME
@@ -26,6 +27,14 @@ from src.utils.errors import (
     ValidationError,
 )
 from src.utils.logging_config import get_logger
+from src.utils.validation import (
+    handle_integrity_error,
+    quote_identifier,
+    table_exists,
+    validate_columns_config,
+    validate_image_columns,
+    validate_string_length,
+)
 
 logger = get_logger(__name__)
 
@@ -67,6 +76,7 @@ def initialize_dataset(
         ValidationError: If slot number is invalid or name is duplicate
         DatabaseError: If table creation fails
     """
+    # Validate inputs
     # Validate slot number
     if slot_number < 1 or slot_number > MAX_DATASET_SLOTS:
         raise ValidationError(
@@ -74,6 +84,15 @@ def initialize_dataset(
             field="slot_number",
             value=slot_number,
         )
+
+    # Validate string lengths
+    name = validate_string_length(name, 255, "Dataset name")
+    if duplicate_filter_column:
+        duplicate_filter_column = validate_string_length(duplicate_filter_column, 255, "duplicate_filter_column")
+
+    # Validate JSON structures
+    columns_config = validate_columns_config(columns_config, allow_empty=False)
+    image_columns = validate_image_columns(image_columns, columns_config=columns_config)
 
     # Check if slot is already occupied
     existing = (
@@ -101,7 +120,52 @@ def initialize_dataset(
     table_name = f"dataset_{slot_number}_{name.lower().replace(' ', '_').replace('-', '_')}"
     # Remove special characters
     table_name = "".join(c if c.isalnum() or c == "_" else "" for c in table_name)
+    
+    # Validate and truncate table name if needed (max 255 chars)
+    table_name = validate_string_length(table_name, 255, "table_name", allow_truncate=True)
+    
+    # Check if table name already exists (collision check)
+    # Use retry logic to handle race conditions
+    from src.utils.validation import retry_with_backoff
+    
+    def check_table_name_collision():
+        """Check if table name exists and generate unique one if needed."""
+        counter = 1
+        base_name = table_name
+        current_name = base_name
+        
+        while table_exists(session, current_name):
+            counter += 1
+            # Truncate base name if needed to make room for version suffix
+            suffix = f"_{counter}"
+            max_base_length = 255 - len(suffix)
+            if len(base_name) > max_base_length:
+                base_name = base_name[:max_base_length]
+            current_name = f"{base_name}{suffix}"
+            
+            if counter > 100:
+                raise DatabaseError(
+                    f"Unable to generate unique table name after 100 attempts",
+                    operation="initialize_dataset"
+                )
+        return current_name
+    
+    try:
+        table_name = retry_with_backoff(
+            check_table_name_collision,
+            max_attempts=3,
+            initial_delay=0.1,
+            max_delay=1.0,
+        )
+    except DatabaseError:
+        raise
+    except Exception as e:
+        raise DatabaseError(
+            f"Failed to generate unique table name: {e}",
+            operation="initialize_dataset"
+        ) from e
 
+    table_created = False
     try:
         # Create table dynamically
         metadata = MetaData()
@@ -128,6 +192,7 @@ def initialize_dataset(
 
         table = Table(table_name, metadata, *columns)
         metadata.create_all(bind=session.bind)
+        table_created = True
 
         logger.info(f"Created table {table_name} for dataset '{name}'")
 
@@ -149,8 +214,38 @@ def initialize_dataset(
 
         return dataset
 
+    except IntegrityError as e:
+        session.rollback()
+        # Clean up orphaned table if it was created
+        if table_created:
+            try:
+                quoted_table = quote_identifier(table_name)
+                session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
+                session.commit()
+                logger.warning(f"Cleaned up orphaned table {table_name} after IntegrityError")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
+        
+        # Convert to ValidationError with clear message
+        context = {
+            "name": "Dataset name",
+            "slot_number": "Slot number",
+            "table_name": "Table name",
+        }
+        raise handle_integrity_error(e, context) from e
+
     except Exception as e:
         session.rollback()
+        # Clean up orphaned table if it was created
+        if table_created:
+            try:
+                quoted_table = quote_identifier(table_name)
+                session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
+                session.commit()
+                logger.warning(f"Cleaned up orphaned table {table_name} after error")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup orphaned table during error handling: {cleanup_error}")
+        
         logger.error(f"Failed to initialize dataset: {e}", exc_info=True)
         raise DatabaseError(f"Failed to initialize dataset: {e}", operation="initialize_dataset") from e
 
@@ -223,6 +318,12 @@ def upload_csv_to_dataset(
     df = parse_csv_file(csv_file, show_progress=show_progress)
 
     # Validate column matching
+    if not dataset.columns_config:
+        raise ValidationError(
+            f"Dataset {dataset_id} has invalid columns_config (None or empty)",
+            field="columns_config",
+            value=dataset_id,
+        )
     expected_columns = list(dataset.columns_config.keys())
     actual_columns = list(df.columns)
     validate_column_matching(expected_columns, actual_columns)
@@ -332,8 +433,10 @@ def get_dataset_statistics(
         raise ValidationError(f"Dataset with ID {dataset_id} not found")
 
     # Get row count
+    from src.utils.validation import quote_identifier
+    quoted_table = quote_identifier(dataset.table_name)
     result = session.execute(
-        text(f"SELECT COUNT(*) FROM {dataset.table_name}")
+        text(f"SELECT COUNT(*) FROM {quoted_table}")
     )
     total_rows = result.scalar() or 0
 
@@ -350,6 +453,12 @@ def get_dataset_statistics(
     last_upload = upload_logs[-1].upload_date.isoformat() if upload_logs else None
 
     # Extract column info
+    if not dataset.columns_config:
+        raise ValidationError(
+            f"Dataset {dataset_id} has invalid columns_config (None or empty)",
+            field="columns_config",
+            value=dataset_id,
+        )
     column_names = list(dataset.columns_config.keys())
     column_types = {
         name: config.get("type", "TEXT")
@@ -374,7 +483,8 @@ def delete_dataset(
     """
     Delete a dataset.
     
-    Drops the table, removes metadata, and cleans up upload logs.
+    Drops the table, removes metadata, cleans up upload logs, and drops
+    all associated enriched tables to prevent orphaned tables.
     
     Args:
         session: Database session
@@ -391,10 +501,32 @@ def delete_dataset(
     table_name = dataset.table_name
 
     try:
-        # Drop table
-        session.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+        # First, drop all enriched tables associated with this dataset
+        # Foreign key CASCADE will delete EnrichedDataset records, but we need to drop the tables
+        from src.database.models import EnrichedDataset
+        from src.utils.validation import quote_identifier
+        
+        enriched_datasets = (
+            session.query(EnrichedDataset)
+            .filter_by(source_dataset_id=dataset_id)
+            .all()
+        )
+        
+        for enriched_dataset in enriched_datasets:
+            try:
+                # Drop the enriched table before deleting the record
+                quoted_table = quote_identifier(enriched_dataset.enriched_table_name)
+                session.execute(text(f"DROP TABLE IF EXISTS {quoted_table}"))
+                logger.info(f"Dropped enriched table {enriched_dataset.enriched_table_name}")
+            except Exception as e:
+                # Log warning but continue - table might not exist or already dropped
+                logger.warning(f"Failed to drop enriched table {enriched_dataset.enriched_table_name}: {e}")
+        
+        # Drop source table
+        quoted_source_table = quote_identifier(table_name)
+        session.execute(text(f"DROP TABLE IF EXISTS {quoted_source_table}"))
 
-        # Delete dataset config (cascade will delete upload logs)
+        # Delete dataset config (cascade will delete upload logs and EnrichedDataset records)
         session.delete(dataset)
         session.commit()
 

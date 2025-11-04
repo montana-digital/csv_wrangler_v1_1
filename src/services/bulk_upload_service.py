@@ -100,6 +100,9 @@ def validate_file_for_dataset(
     if not dataset:
         return False, "validation_error", f"Dataset with ID {dataset_id} not found"
 
+    if not dataset.columns_config:
+        return False, "validation_error", f"Dataset {dataset_id} has invalid columns_config (None or empty)"
+
     expected_columns = list(dataset.columns_config.keys())
     actual_columns = list(df.columns)
 
@@ -159,6 +162,12 @@ def upload_file_to_dataset(
         df, _ = import_file(file_path, show_progress=False)
 
         # Validate columns (should already be validated, but double-check)
+        if not dataset.columns_config:
+            raise ValidationError(
+                f"Dataset {dataset_id} has invalid columns_config (None or empty)",
+                field="columns_config",
+                value=dataset_id,
+            )
         expected_columns = list(dataset.columns_config.keys())
         actual_columns = list(df.columns)
         validate_column_matching(expected_columns, actual_columns)

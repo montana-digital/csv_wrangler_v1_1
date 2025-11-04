@@ -527,3 +527,98 @@ class TestUpdateEnrichedColumnValues:
         
         assert rows_updated == 0
 
+
+class TestTableServiceWithSpacesInColumnNames:
+    """Test table service functions with spaces in column names."""
+
+    def test_add_column_with_spaces(self, test_session):
+        """Test adding a column with spaces in the name."""
+        columns_config = {"name": {"type": "TEXT", "is_image": False}}
+        dataset = initialize_dataset(
+            session=test_session,
+            name="Test Dataset",
+            slot_number=1,
+            columns_config=columns_config,
+            image_columns=[],
+        )
+        
+        # Add column with spaces
+        add_column_to_table(
+            session=test_session,
+            table_name=dataset.table_name,
+            column_name="new column with spaces",
+            column_type="TEXT",
+        )
+        
+        # Verify column was added
+        inspector = inspect(test_session.bind)
+        columns = [col["name"] for col in inspector.get_columns(dataset.table_name)]
+        assert "new column with spaces" in columns
+
+    def test_create_index_on_column_with_spaces(self, test_session):
+        """Test creating an index on a column with spaces."""
+        columns_config = {"column with spaces": {"type": "TEXT", "is_image": False}}
+        dataset = initialize_dataset(
+            session=test_session,
+            name="Test Dataset",
+            slot_number=1,
+            columns_config=columns_config,
+            image_columns=[],
+        )
+        
+        # Create index on column with spaces
+        create_index_on_column(
+            session=test_session,
+            table_name=dataset.table_name,
+            column_name="column with spaces",
+        )
+        
+        # Verify index was created
+        result = test_session.execute(
+            text(f"SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='{dataset.table_name}'")
+        )
+        indexes = [row[0] for row in result.fetchall()]
+        assert len(indexes) > 0
+
+    def test_update_enriched_column_values_with_spaces(self, test_session):
+        """Test updating enriched column values with spaces in column names."""
+        columns_config = {"source column": {"type": "TEXT", "is_image": False}}
+        dataset = initialize_dataset(
+            session=test_session,
+            name="Test Dataset",
+            slot_number=1,
+            columns_config=columns_config,
+            image_columns=[],
+        )
+        
+        # Add enriched column with spaces
+        add_column_to_table(
+            session=test_session,
+            table_name=dataset.table_name,
+            column_name="enriched column with spaces",
+            column_type="TEXT",
+        )
+        
+        # Insert initial row
+        from src.config.settings import UNIQUE_ID_COLUMN_NAME
+        test_data = pd.DataFrame({
+            "source column": ["value1"],
+            UNIQUE_ID_COLUMN_NAME: ["uuid1"],
+        })
+        insert_dataframe_to_table(test_session, dataset.table_name, test_data)
+        
+        # Update enriched column
+        update_df = pd.DataFrame({
+            UNIQUE_ID_COLUMN_NAME: ["uuid1"],
+            "enriched column with spaces": ["enriched_value1"],
+        })
+        
+        updated_count = update_enriched_column_values(
+            session=test_session,
+            table_name=dataset.table_name,
+            column_name="enriched column with spaces",
+            df=update_df,
+        )
+        
+        assert updated_count == 1
+

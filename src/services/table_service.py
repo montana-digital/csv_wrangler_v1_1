@@ -10,8 +10,9 @@ import pandas as pd
 from sqlalchemy import Column, Float, Integer, MetaData, Table, Text, inspect, text
 from sqlalchemy.orm import Session
 
-from src.utils.errors import DatabaseError
+from src.utils.errors import DatabaseError, ValidationError
 from src.utils.logging_config import get_logger
+from src.utils.validation import column_exists, quote_identifier, table_exists
 
 logger = get_logger(__name__)
 
@@ -38,6 +39,14 @@ def copy_table_structure(
         DatabaseError: If table creation fails
     """
     try:
+        # Validate source table exists
+        if not table_exists(session, source_table_name):
+            raise ValidationError(
+                f"Source table '{source_table_name}' does not exist",
+                field="source_table_name",
+                value=source_table_name,
+            )
+        
         inspector = inspect(session.bind)
         
         # Get source table columns
@@ -119,7 +128,10 @@ def copy_table_data(
     """
     try:
         # Use SQL INSERT INTO ... SELECT for efficient copy
-        query = text(f"INSERT INTO {target_table_name} SELECT * FROM {source_table_name}")
+        # Quote table names for safety (handles edge cases)
+        quoted_target = quote_identifier(target_table_name)
+        quoted_source = quote_identifier(source_table_name)
+        query = text(f"INSERT INTO {quoted_target} SELECT * FROM {quoted_source}")
         result = session.execute(query)
         rows_copied = result.rowcount
         
@@ -158,9 +170,28 @@ def add_column_to_table(
         DatabaseError: If column addition fails
     """
     try:
+        # Validate table exists
+        if not table_exists(session, table_name):
+            raise ValidationError(
+                f"Table '{table_name}' does not exist",
+                field="table_name",
+                value=table_name,
+            )
+        
+        # Check if column already exists
+        if column_exists(session, table_name, column_name):
+            raise ValidationError(
+                f"Column '{column_name}' already exists in table '{table_name}'",
+                field="column_name",
+                value=column_name,
+            )
+        
         # SQLite ALTER TABLE ADD COLUMN
+        # Quote identifiers to handle spaces and special characters
+        quoted_table = quote_identifier(table_name)
+        quoted_column = quote_identifier(column_name)
         query = text(
-            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+            f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_column} {column_type}"
         )
         session.execute(query)
         session.commit()
@@ -196,6 +227,21 @@ def create_index_on_column(
         DatabaseError: If index creation fails
     """
     try:
+        # Validate table and column exist
+        if not table_exists(session, table_name):
+            raise ValidationError(
+                f"Table '{table_name}' does not exist",
+                field="table_name",
+                value=table_name,
+            )
+        
+        if not column_exists(session, table_name, column_name):
+            raise ValidationError(
+                f"Column '{column_name}' does not exist in table '{table_name}'",
+                field="column_name",
+                value=column_name,
+            )
+        
         # Generate index name if not provided
         if index_name is None:
             # Sanitize table and column names for index name
@@ -205,16 +251,19 @@ def create_index_on_column(
             index_name = f"idx_{safe_table}_{safe_column}{index_suffix}"
         
         # Create index with optional WHERE clause for NOT NULL filter
+        # Quote identifiers to handle spaces and special characters
+        quoted_table = quote_identifier(table_name)
+        quoted_column = quote_identifier(column_name)
         if include_not_null_filter:
             query = text(
                 f"CREATE INDEX IF NOT EXISTS {index_name} "
-                f"ON {table_name}({column_name}) "
-                f"WHERE {column_name} IS NOT NULL"
+                f"ON {quoted_table}({quoted_column}) "
+                f"WHERE {quoted_column} IS NOT NULL"
             )
         else:
             query = text(
                 f"CREATE INDEX IF NOT EXISTS {index_name} "
-                f"ON {table_name}({column_name})"
+                f"ON {quoted_table}({quoted_column})"
             )
         
         session.execute(query)
@@ -242,7 +291,9 @@ def get_table_row_count(session: Session, table_name: str) -> int:
         Number of rows in table
     """
     try:
-        query = text(f"SELECT COUNT(*) FROM {table_name}")
+        # Quote table name for safety
+        quoted_table = quote_identifier(table_name)
+        query = text(f"SELECT COUNT(*) FROM {quoted_table}")
         result = session.execute(query)
         count = result.scalar() or 0
         return count
@@ -273,15 +324,19 @@ def get_new_rows_since_sync(
     """
     try:
         # Get all unique_ids from enriched table
+        # Quote identifiers to handle spaces and special characters
+        quoted_unique_id = quote_identifier(unique_id_column)
+        quoted_enriched_table = quote_identifier(enriched_table_name)
         enriched_query = text(
-            f"SELECT {unique_id_column} FROM {enriched_table_name}"
+            f"SELECT {quoted_unique_id} FROM {quoted_enriched_table}"
         )
         enriched_result = session.execute(enriched_query)
         enriched_ids = {row[0] for row in enriched_result.fetchall()}
         
         if not enriched_ids:
             # Enriched table is empty, return all rows from source
-            source_query = text(f"SELECT * FROM {source_table_name}")
+            quoted_source_table = quote_identifier(source_table_name)
+            source_query = text(f"SELECT * FROM {quoted_source_table}")
             source_result = session.execute(source_query)
             rows = source_result.fetchall()
             if rows:
@@ -290,7 +345,8 @@ def get_new_rows_since_sync(
         
         # Get rows from source that aren't in enriched
         # SQLite doesn't support parameterized table names, so we need to construct query
-        source_query = text(f"SELECT * FROM {source_table_name}")
+        quoted_source_table = quote_identifier(source_table_name)
+        source_query = text(f"SELECT * FROM {quoted_source_table}")
         source_result = session.execute(source_query)
         rows = source_result.fetchall()
         
@@ -383,6 +439,11 @@ def update_enriched_column_values(
         updated_count = 0
         
         # Update row by row (SQLite doesn't have great bulk update support)
+        # Quote identifiers to handle spaces and special characters
+        quoted_table = quote_identifier(table_name)
+        quoted_column = quote_identifier(column_name)
+        quoted_unique_id = quote_identifier(unique_id_column)
+        
         for _, row in df.iterrows():
             unique_id = row[unique_id_column]
             enriched_value = row[column_name]
@@ -391,11 +452,14 @@ def update_enriched_column_values(
             if pd.isna(enriched_value):
                 value_str = "NULL"
             else:
+                # Escape single quotes in value
                 value_str = f"'{str(enriched_value).replace("'", "''")}'"
             
+            # Escape single quotes in unique_id
+            unique_id_escaped = str(unique_id).replace("'", "''")
             query = text(
-                f"UPDATE {table_name} SET {column_name} = {value_str} "
-                f"WHERE {unique_id_column} = '{unique_id}'"
+                f"UPDATE {quoted_table} SET {quoted_column} = {value_str} "
+                f"WHERE {quoted_unique_id} = '{unique_id_escaped}'"
             )
             result = session.execute(query)
             updated_count += result.rowcount

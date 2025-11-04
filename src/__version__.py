@@ -7,8 +7,8 @@ Version format: MAJOR.MINOR.PATCH
 - MINOR: New features, backward compatible
 - PATCH: Bug fixes, backward compatible
 """
-__version__ = "1.0.0"
-__version_info__ = (1, 0, 0)
+__version__ = "1.0.1"
+__version_info__ = (1, 0, 1)
 
 # Version history
 VERSION_HISTORY = {
@@ -121,6 +121,22 @@ VERSION_HISTORY = {
             "Pinned details persist when selecting other rows",
             "Pins automatically cleared when switching tables",
             "Comprehensive test suite for pinning and selection features (16 tests)",
+        ],
+    },
+    "1.0.1": {
+        "date": "2025-01-28",
+        "status": "final",
+        "description": "Database Implementation Improvements - Critical fixes and enhancements",
+        "features": [
+            "Fixed Migration 6 database connection bug - proper transaction context",
+            "Created EnrichedDatasetRepository following repository pattern",
+            "Added missing database indexes for EnrichedDataset.source_dataset_id",
+            "Added defensive None checks for JSON fields (columns_config, image_columns, etc.)",
+            "Fixed SQL injection risks - all raw SQL now uses quote_identifier()",
+            "Added operation-specific validation for operation_config",
+            "Improved error handling in migrations with detailed logging",
+            "Removed unnecessary pool_pre_ping for SQLite connections",
+            "Enhanced transaction isolation documentation",
         ],
     },
 }

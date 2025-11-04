@@ -17,6 +17,7 @@ from src.config.settings import (
 )
 from src.utils.errors import DatabaseError
 from src.utils.logging_config import get_logger
+from src.utils.validation import quote_identifier
 
 logger = get_logger(__name__)
 
@@ -42,6 +43,7 @@ def get_engine() -> Engine:
             database_url = get_database_url()
 
             # Create engine with SQLite-specific configuration
+            # Note: pool_pre_ping is not needed for SQLite (file-based connections are lightweight)
             _engine = create_engine(
                 database_url,
                 connect_args={
@@ -49,7 +51,6 @@ def get_engine() -> Engine:
                     "timeout": SQLITE_TIMEOUT,
                 },
                 echo=False,  # Set to True for SQL debugging
-                pool_pre_ping=True,  # Verify connections before using
             )
 
             # Enable foreign key constraints for SQLite
@@ -151,13 +152,18 @@ def migrate_database() -> None:
             
             for table_name in tables:
                 # Check if unique_id column exists in this table
-                result = conn.execute(text(f"PRAGMA table_info({table_name})"))
+                # Quote table name for PRAGMA (though PRAGMA doesn't strictly require it, it's safer)
+                quoted_table = quote_identifier(table_name)
+                result = conn.execute(text(f"PRAGMA table_info({quoted_table})"))
                 columns = {row[1]: row[0] for row in result.fetchall()}  # name: cid
                 
                 if "unique_id" in columns and UNIQUE_ID_COLUMN_NAME not in columns:
                     logger.info(f"Renaming unique_id to {UNIQUE_ID_COLUMN_NAME} in table {table_name}")
                     # SQLite 3.25.0+ supports ALTER TABLE RENAME COLUMN
-                    conn.execute(text(f"ALTER TABLE {table_name} RENAME COLUMN unique_id TO {UNIQUE_ID_COLUMN_NAME}"))
+                    # Quote identifiers to handle any edge cases
+                    quoted_unique_id = quote_identifier("unique_id")
+                    quoted_uuid_value = quote_identifier(UNIQUE_ID_COLUMN_NAME)
+                    conn.execute(text(f"ALTER TABLE {quoted_table} RENAME COLUMN {quoted_unique_id} TO {quoted_uuid_value}"))
                     conn.commit()
                     logger.info(f"Successfully renamed column in table {table_name}")
             
@@ -198,67 +204,137 @@ def migrate_database() -> None:
                 
                 conn.commit()
                 logger.info("Successfully created knowledge_table table with indexes")
-        
-        # Migration 6: Index existing enriched columns for search performance
-        try:
-            from src.database.models import EnrichedDataset
-            from src.services.table_service import create_index_on_column
             
-            enriched_datasets = conn.execute(
-                text("SELECT id, enriched_table_name, columns_added FROM enriched_dataset")
-            ).fetchall()
-            
-            indexed_count = 0
-            for enriched_dataset_row in enriched_datasets:
-                enriched_table_name = enriched_dataset_row[1]
-                columns_added_json = enriched_dataset_row[2]
+            # Migration 6: Index existing enriched columns for search performance
+            # This must be inside the connection context to ensure proper transaction handling
+            try:
+                from src.database.models import EnrichedDataset
                 
-                if not columns_added_json:
-                    continue
-                
-                # Parse columns_added (JSON array of strings)
-                import json
-                try:
-                    columns_added = json.loads(columns_added_json) if isinstance(columns_added_json, str) else columns_added_json
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                
-                # Create index for each enriched column
-                for enriched_col_name in columns_added:
-                    if not isinstance(enriched_col_name, str):
-                        continue
+                # Check if enriched_dataset table exists before querying
+                result = conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table' AND name='enriched_dataset'")
+                )
+                if not result.fetchone():
+                    logger.info("Migration 6: enriched_dataset table does not exist, skipping index creation")
+                else:
+                    enriched_datasets = conn.execute(
+                        text("SELECT id, enriched_table_name, columns_added FROM enriched_dataset")
+                    ).fetchall()
                     
-                    # Check if index already exists
-                    safe_table = enriched_table_name.replace(".", "_").replace("-", "_")
-                    safe_column = enriched_col_name.replace(".", "_").replace("-", "_")
-                    index_name = f"idx_{safe_table}_{safe_column}_not_null"
-                    
-                    existing_index = conn.execute(
-                        text("SELECT name FROM sqlite_master WHERE type='index' AND name=?"),
-                        (index_name,)
-                    ).fetchone()
-                    
-                    if not existing_index:
-                        try:
-                            # Create index directly using SQL (simpler than creating session)
-                            conn.execute(text(
-                                f"CREATE INDEX IF NOT EXISTS {index_name} "
-                                f"ON {enriched_table_name}({enriched_col_name}) "
-                                f"WHERE {enriched_col_name} IS NOT NULL"
-                            ))
-                            indexed_count += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to create index on {enriched_table_name}.{enriched_col_name}: {e}")
+                    indexed_count = 0
+                    failed_count = 0
+                    for enriched_dataset_row in enriched_datasets:
+                        enriched_id = enriched_dataset_row[0]
+                        enriched_table_name = enriched_dataset_row[1]
+                        columns_added_json = enriched_dataset_row[2]
+                        
+                        if not columns_added_json:
+                            logger.debug(f"Migration 6: EnrichedDataset ID {enriched_id} has no columns_added, skipping")
                             continue
+                        
+                        # Parse columns_added (JSON array of strings)
+                        import json
+                        try:
+                            columns_added = json.loads(columns_added_json) if isinstance(columns_added_json, str) else columns_added_json
+                        except (json.JSONDecodeError, TypeError) as e:
+                            logger.warning(f"Migration 6: Failed to parse columns_added JSON for EnrichedDataset ID {enriched_id}: {e}")
+                            continue
+                        
+                        if not isinstance(columns_added, list):
+                            logger.warning(f"Migration 6: columns_added is not a list for EnrichedDataset ID {enriched_id}, skipping")
+                            continue
+                        
+                        # Create index for each enriched column
+                        for enriched_col_name in columns_added:
+                            if not isinstance(enriched_col_name, str):
+                                logger.warning(
+                                    f"Migration 6: Invalid column name type for EnrichedDataset ID {enriched_id}, "
+                                    f"column: {enriched_col_name}, type: {type(enriched_col_name)}"
+                                )
+                                continue
+                            
+                            # Check if index already exists
+                            safe_table = enriched_table_name.replace(".", "_").replace("-", "_")
+                            safe_column = enriched_col_name.replace(".", "_").replace("-", "_")
+                            index_name = f"idx_{safe_table}_{safe_column}_not_null"
+                            
+                            try:
+                                existing_index = conn.execute(
+                                    text("SELECT name FROM sqlite_master WHERE type='index' AND name=?"),
+                                    (index_name,)
+                                ).fetchone()
+                                
+                                if not existing_index:
+                                    # Create index directly using SQL
+                                    # Quote identifiers to handle spaces/special characters
+                                    quoted_table = quote_identifier(enriched_table_name)
+                                    quoted_col = quote_identifier(enriched_col_name)
+                                    conn.execute(text(
+                                        f"CREATE INDEX IF NOT EXISTS {index_name} "
+                                        f"ON {quoted_table}({quoted_col}) "
+                                        f"WHERE {quoted_col} IS NOT NULL"
+                                    ))
+                                    indexed_count += 1
+                                    logger.debug(
+                                        f"Migration 6: Created index {index_name} on {enriched_table_name}.{enriched_col_name}"
+                                    )
+                                else:
+                                    logger.debug(
+                                        f"Migration 6: Index {index_name} already exists for {enriched_table_name}.{enriched_col_name}"
+                                    )
+                            except Exception as e:
+                                failed_count += 1
+                                logger.warning(
+                                    f"Migration 6: Failed to create index on {enriched_table_name}.{enriched_col_name} "
+                                    f"for EnrichedDataset ID {enriched_id}: {e}"
+                                )
+                                continue
+                    
+                    if indexed_count > 0:
+                        conn.commit()
+                        logger.info(
+                            f"Migration 6: Created {indexed_count} indexes on existing enriched columns "
+                            f"({failed_count} failures)"
+                        )
+                    elif failed_count > 0:
+                        logger.warning(f"Migration 6: Failed to create {failed_count} indexes, no indexes created")
+                    else:
+                        logger.info("Migration 6: No new indexes needed for enriched columns")
+                        
+            except Exception as e:
+                logger.error(f"Migration 6 (index enriched columns) failed: {e}", exc_info=True)
+                # Don't raise - allow migration to continue even if this fails
+                # The indexes are for performance, not critical for functionality
             
-            if indexed_count > 0:
-                conn.commit()
-                logger.info(f"Migration 6: Created {indexed_count} indexes on existing enriched columns")
-            else:
-                logger.info("Migration 6: No new indexes needed for enriched columns")
-                
-        except Exception as e:
-            logger.warning(f"Migration 6 (index enriched columns) failed: {e}. Continuing...")
+            # Migration 7: Add indexes for enriched_dataset table
+            try:
+                result = conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table' AND name='enriched_dataset'")
+                )
+                if result.fetchone():
+                    # Check if indexes already exist
+                    result = conn.execute(
+                        text("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_enriched_dataset_source_dataset_id'")
+                    )
+                    if not result.fetchone():
+                        logger.info("Creating index on enriched_dataset.source_dataset_id")
+                        conn.execute(
+                            text("CREATE INDEX IF NOT EXISTS idx_enriched_dataset_source_dataset_id ON enriched_dataset(source_dataset_id)")
+                        )
+                        logger.debug("Created index idx_enriched_dataset_source_dataset_id")
+                    else:
+                        logger.debug("Index idx_enriched_dataset_source_dataset_id already exists")
+                    
+                    # Note: enriched_table_name already has a unique constraint which acts as an index
+                    # but we can still create an explicit index if needed for clarity
+                    # For now, we skip it since unique constraints create indexes automatically
+                    
+                    conn.commit()
+                    logger.info("Migration 7: Added indexes for enriched_dataset table")
+                else:
+                    logger.debug("Migration 7: enriched_dataset table does not exist, skipping index creation")
+            except Exception as e:
+                logger.warning(f"Migration 7 (add enriched_dataset indexes) failed: {e}. Continuing...")
                     
     except Exception as e:
         logger.error(f"Failed to migrate database: {e}", exc_info=True)

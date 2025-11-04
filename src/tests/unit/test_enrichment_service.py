@@ -449,3 +449,94 @@ class TestDeleteEnrichedDataset:
         
         assert "not found" in str(exc_info.value).lower()
 
+
+class TestEnrichmentWithSpacesInColumnNames:
+    """Test enrichment operations with spaces in column names."""
+
+    def test_create_enriched_dataset_with_spaces_in_source_column(self, test_session, tmp_path):
+        """Test creating enriched dataset from source with spaces in column names."""
+        # Create source dataset with spaces in column names
+        columns_config = {
+            "admin contact email": {"type": "TEXT", "is_image": False},
+            "phone number": {"type": "TEXT", "is_image": False},
+        }
+        dataset = initialize_dataset(
+            session=test_session,
+            name="Source with Spaces",
+            slot_number=1,
+            columns_config=columns_config,
+            image_columns=[],
+        )
+        
+        # Add data
+        csv_file = tmp_path / "source.csv"
+        csv_file.write_text(
+            "admin contact email,phone number\nadmin@example.com,555-123-4567",
+            encoding="utf-8"
+        )
+        upload_csv_to_dataset(
+            session=test_session,
+            dataset_id=dataset.id,
+            csv_file=csv_file,
+            filename="source.csv"
+        )
+        
+        # Create enriched dataset
+        enrichment_config = {"admin contact email": "emails"}
+        enriched = create_enriched_dataset(
+            session=test_session,
+            source_dataset_id=dataset.id,
+            name="Enriched from Spaces",
+            enrichment_config=enrichment_config
+        )
+        
+        assert enriched is not None
+        # Enriched column name should be sanitized (no spaces)
+        assert any("admin_contact_email" in col and "enriched" in col for col in enriched.columns_added)
+
+    def test_sync_enriched_dataset_with_spaces_in_column_names(self, test_session, tmp_path):
+        """Test syncing enriched dataset when source has spaces in column names."""
+        columns_config = {
+            "admin contact email": {"type": "TEXT", "is_image": False},
+        }
+        dataset = initialize_dataset(
+            session=test_session,
+            name="Source",
+            slot_number=1,
+            columns_config=columns_config,
+            image_columns=[],
+        )
+        
+        # Add initial data
+        csv_file = tmp_path / "initial.csv"
+        csv_file.write_text("admin contact email\nadmin@example.com", encoding="utf-8")
+        upload_csv_to_dataset(
+            session=test_session,
+            dataset_id=dataset.id,
+            csv_file=csv_file,
+            filename="initial.csv"
+        )
+        
+        # Create enriched dataset
+        enrichment_config = {"admin contact email": "emails"}
+        enriched = create_enriched_dataset(
+            session=test_session,
+            source_dataset_id=dataset.id,
+            name="Enriched",
+            enrichment_config=enrichment_config
+        )
+        
+        # Add new data to source
+        new_csv = tmp_path / "new.csv"
+        new_csv.write_text("admin contact email\nnew@example.com", encoding="utf-8")
+        upload_csv_to_dataset(
+            session=test_session,
+            dataset_id=dataset.id,
+            csv_file=new_csv,
+            filename="new.csv"
+        )
+        
+        # Sync
+        rows_synced = sync_enriched_dataset(test_session, enriched.id)
+        assert rows_synced == 1
+

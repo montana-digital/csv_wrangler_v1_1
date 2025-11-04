@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from src.database.models import DatasetConfig, EnrichedDataset
 from src.utils.errors import DatabaseError, ValidationError
 from src.utils.logging_config import get_logger
+from src.utils.validation import quote_identifier
 
 logger = get_logger(__name__)
 
@@ -55,6 +56,14 @@ def load_dataset_dataframe(
     try:
         # Get column names
         from src.config.settings import UNIQUE_ID_COLUMN_NAME
+        # Ensure columns_config exists (with mutable default fix, it should always be set)
+        if not dataset.columns_config:
+            raise ValidationError(
+                f"Dataset {dataset_id} has invalid columns_config (None or empty)",
+                field="columns_config",
+                value=dataset_id,
+            )
+        
         # Filter out unique_id from columns_config if it exists (legacy data)
         config_columns = [
             col for col in dataset.columns_config.keys() 
@@ -69,9 +78,11 @@ def load_dataset_dataframe(
                 col for col in columns_to_load if col not in dataset.image_columns
             ]
         
-        # Build SELECT query
-        columns_str = ", ".join(columns_to_load)
-        query = f"SELECT {columns_str} FROM {dataset.table_name}"
+        # Build SELECT query - quote identifiers to handle spaces in column names
+        quoted_columns = [quote_identifier(col) for col in columns_to_load]
+        columns_str = ", ".join(quoted_columns)
+        quoted_table = quote_identifier(dataset.table_name)
+        query = f"SELECT {columns_str} FROM {quoted_table}"
         
         # Add ordering
         if order_by_recent:
@@ -123,7 +134,9 @@ def get_dataset_row_count(session: Session, dataset_id: int) -> int:
         return 0
     
     try:
-        query = text(f"SELECT COUNT(*) FROM {dataset.table_name}")
+        # Quote table name for safety
+        quoted_table = quote_identifier(dataset.table_name)
+        query = text(f"SELECT COUNT(*) FROM {quoted_table}")
         result = session.execute(query)
         count = result.scalar() or 0
         return count
@@ -153,6 +166,15 @@ def get_dataset_columns(
         return []
     
     from src.config.settings import UNIQUE_ID_COLUMN_NAME
+    
+    # Ensure columns_config exists
+    if not dataset.columns_config:
+        raise ValidationError(
+            f"Dataset {dataset_id} has invalid columns_config (None or empty)",
+            field="columns_config",
+            value=dataset_id,
+        )
+    
     # Filter out unique_id from columns_config if it exists (legacy data)
     config_columns = [
         col for col in dataset.columns_config.keys() 
@@ -212,14 +234,16 @@ def load_enriched_dataset_dataframe(
         if not include_image_columns:
             # Get source dataset to check image columns
             source_dataset = session.get(DatasetConfig, enriched_dataset.source_dataset_id)
-            if source_dataset and source_dataset.image_columns:
+            if source_dataset and source_dataset.image_columns and source_dataset.columns_config:
                 columns_to_load = [
                     col for col in columns_to_load if col not in source_dataset.image_columns
                 ]
         
-        # Build SELECT query
-        columns_str = ", ".join(columns_to_load)
-        query = f"SELECT {columns_str} FROM {enriched_dataset.enriched_table_name}"
+        # Build SELECT query - quote identifiers to handle spaces in column names
+        quoted_columns = [quote_identifier(col) for col in columns_to_load]
+        columns_str = ", ".join(quoted_columns)
+        quoted_table = quote_identifier(enriched_dataset.enriched_table_name)
+        query = f"SELECT {columns_str} FROM {quoted_table}"
         
         # Add ordering
         if order_by_recent:
@@ -271,7 +295,9 @@ def get_enriched_dataset_row_count(session: Session, enriched_dataset_id: int) -
         return 0
     
     try:
-        query = text(f"SELECT COUNT(*) FROM {enriched_dataset.enriched_table_name}")
+        # Quote table name for safety
+        quoted_table = quote_identifier(enriched_dataset.enriched_table_name)
+        query = text(f"SELECT COUNT(*) FROM {quoted_table}")
         result = session.execute(query)
         count = result.scalar() or 0
         return count

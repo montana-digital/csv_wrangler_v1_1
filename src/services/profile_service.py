@@ -11,6 +11,7 @@ from src.database.models import UserProfile
 from src.database.repository import UserProfileRepository
 from src.utils.errors import ValidationError
 from src.utils.logging_config import get_logger
+from src.utils.validation import validate_file_path, validate_string_length
 
 logger = get_logger(__name__)
 
@@ -33,12 +34,7 @@ def create_user_profile(
         ValidationError: If name is empty or invalid
     """
     # Validate name
-    if not name or not name.strip():
-        raise ValidationError(
-            "User name cannot be empty",
-            field="name",
-            value=name,
-        )
+    name = validate_string_length(name.strip() if name else "", 255, "User name")
 
     # Check if profile already exists
     repo = UserProfileRepository(session)
@@ -110,7 +106,9 @@ def update_profile_logo(
             field="profile",
         )
     
-    # Update logo path
+    # Validate and update logo path
+    if logo_path:
+        logo_path = validate_file_path(logo_path, max_length=500, check_exists=False, field_name="logo_path")
     profile.logo_path = logo_path
     session.commit()
     session.refresh(profile)
@@ -138,12 +136,7 @@ def update_profile_name(
         ValidationError: If profile doesn't exist or name is invalid
     """
     # Validate name
-    if not new_name or not new_name.strip():
-        raise ValidationError(
-            "User name cannot be empty",
-            field="name",
-            value=new_name,
-        )
+    new_name = validate_string_length(new_name.strip() if new_name else "", 255, "User name")
     
     repo = UserProfileRepository(session)
     profile = repo.get_first()

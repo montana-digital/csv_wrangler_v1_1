@@ -5,11 +5,13 @@ Provides data access abstraction layer following Repository pattern.
 """
 from typing import Any, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.database.models import (
     DataAnalysis,
     DatasetConfig,
+    EnrichedDataset,
     KnowledgeTable,
     Note,
     UploadLog,
@@ -17,6 +19,7 @@ from src.database.models import (
 )
 from src.utils.errors import DatabaseError, ValidationError
 from src.utils.logging_config import get_logger
+from src.utils.validation import handle_integrity_error
 
 logger = get_logger(__name__)
 
@@ -39,6 +42,7 @@ class DatasetRepository:
             Created DatasetConfig instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If creation fails
         """
         try:
@@ -47,6 +51,14 @@ class DatasetRepository:
             self.session.refresh(dataset)
             logger.debug(f"Created dataset: {dataset.name}")
             return dataset
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "Dataset name",
+                "slot_number": "Slot number",
+                "table_name": "Table name",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to create dataset: {e}", exc_info=True)
@@ -116,6 +128,7 @@ class DatasetRepository:
             Updated DatasetConfig instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If update fails
         """
         try:
@@ -123,6 +136,14 @@ class DatasetRepository:
             self.session.refresh(dataset)
             logger.debug(f"Updated dataset: {dataset.name}")
             return dataset
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "Dataset name",
+                "slot_number": "Slot number",
+                "table_name": "Table name",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to update dataset: {e}", exc_info=True)
@@ -171,6 +192,7 @@ class UploadLogRepository:
             Created UploadLog instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If creation fails
         """
         try:
@@ -179,6 +201,13 @@ class UploadLogRepository:
             self.session.refresh(upload_log)
             logger.debug(f"Created upload log: {upload_log.filename}")
             return upload_log
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "filename": "Filename",
+                "dataset_id": "Dataset ID",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to create upload log: {e}", exc_info=True)
@@ -251,6 +280,7 @@ class UserProfileRepository:
             Created UserProfile instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If creation fails
         """
         try:
@@ -259,6 +289,13 @@ class UserProfileRepository:
             self.session.refresh(profile)
             logger.debug(f"Created user profile: {profile.name}")
             return profile
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "User name",
+                "logo_path": "Logo path",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to create user profile: {e}", exc_info=True)
@@ -298,6 +335,7 @@ class UserProfileRepository:
             Updated UserProfile instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If update fails
         """
         try:
@@ -305,6 +343,13 @@ class UserProfileRepository:
             self.session.refresh(profile)
             logger.debug(f"Updated user profile: {profile.name}")
             return profile
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "User name",
+                "logo_path": "Logo path",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to update user profile: {e}", exc_info=True)
@@ -340,6 +385,7 @@ class NoteRepository:
             Created Note instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If creation fails
         """
         try:
@@ -348,6 +394,10 @@ class NoteRepository:
             self.session.refresh(note)
             logger.debug(f"Created note: ID {note.id}")
             return note
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {}
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to create note: {e}", exc_info=True)
@@ -430,6 +480,7 @@ class DataAnalysisRepository:
             Created DataAnalysis instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If creation fails
         """
         try:
@@ -438,6 +489,14 @@ class DataAnalysisRepository:
             self.session.refresh(analysis)
             logger.debug(f"Created data analysis: ID {analysis.id}")
             return analysis
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "Analysis name",
+                "source_dataset_id": "Source dataset ID",
+                "secondary_dataset_id": "Secondary dataset ID",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to create data analysis: {e}", exc_info=True)
@@ -498,6 +557,7 @@ class DataAnalysisRepository:
             Updated DataAnalysis instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If update fails
         """
         try:
@@ -505,6 +565,14 @@ class DataAnalysisRepository:
             self.session.refresh(analysis)
             logger.debug(f"Updated data analysis: ID {analysis.id}")
             return analysis
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "Analysis name",
+                "source_dataset_id": "Source dataset ID",
+                "secondary_dataset_id": "Secondary dataset ID",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to update data analysis: {e}", exc_info=True)
@@ -562,6 +630,7 @@ class KnowledgeTableRepository:
             Created KnowledgeTable instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If creation fails
         """
         try:
@@ -570,6 +639,13 @@ class KnowledgeTableRepository:
             self.session.refresh(knowledge_table)
             logger.debug(f"Created Knowledge Table: {knowledge_table.name}")
             return knowledge_table
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "Knowledge Table name",
+                "table_name": "Table name",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to create Knowledge Table: {e}", exc_info=True)
@@ -662,6 +738,7 @@ class KnowledgeTableRepository:
             Updated KnowledgeTable instance
             
         Raises:
+            ValidationError: If unique constraint violation
             DatabaseError: If update fails
         """
         try:
@@ -669,6 +746,13 @@ class KnowledgeTableRepository:
             self.session.refresh(knowledge_table)
             logger.debug(f"Updated Knowledge Table: {knowledge_table.name}")
             return knowledge_table
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "Knowledge Table name",
+                "table_name": "Table name",
+            }
+            raise handle_integrity_error(e, context) from e
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to update Knowledge Table: {e}", exc_info=True)
@@ -704,5 +788,186 @@ class KnowledgeTableRepository:
             logger.error(f"Failed to delete Knowledge Table: {e}", exc_info=True)
             raise DatabaseError(
                 f"Failed to delete Knowledge Table: {e}", operation="delete_knowledge_table"
+            ) from e
+
+
+class EnrichedDatasetRepository:
+    """Repository for EnrichedDataset operations."""
+
+    def __init__(self, session: Session):
+        """Initialize repository with database session."""
+        self.session = session
+
+    def create(self, enriched_dataset: EnrichedDataset) -> EnrichedDataset:
+        """
+        Create a new enriched dataset.
+        
+        Args:
+            enriched_dataset: EnrichedDataset instance to create
+            
+        Returns:
+            Created EnrichedDataset instance
+            
+        Raises:
+            ValidationError: If unique constraint violation
+            DatabaseError: If creation fails
+        """
+        try:
+            self.session.add(enriched_dataset)
+            self.session.commit()
+            self.session.refresh(enriched_dataset)
+            logger.debug(f"Created enriched dataset: {enriched_dataset.name}")
+            return enriched_dataset
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "Enriched dataset name",
+                "enriched_table_name": "Enriched table name",
+                "source_dataset_id": "Source dataset ID",
+            }
+            raise handle_integrity_error(e, context) from e
+        except Exception as e:
+            self.session.rollback()
+            logger.error(f"Failed to create enriched dataset: {e}", exc_info=True)
+            raise DatabaseError(
+                f"Failed to create enriched dataset: {e}", operation="create_enriched_dataset"
+            ) from e
+
+    def get_by_id(self, enriched_dataset_id: int) -> Optional[EnrichedDataset]:
+        """
+        Get enriched dataset by ID.
+        
+        Args:
+            enriched_dataset_id: Enriched dataset ID
+            
+        Returns:
+            EnrichedDataset instance or None if not found
+        """
+        return self.session.get(EnrichedDataset, enriched_dataset_id)
+
+    def get_by_name(self, name: str) -> Optional[EnrichedDataset]:
+        """
+        Get enriched dataset by name.
+        
+        Args:
+            name: Enriched dataset name
+            
+        Returns:
+            EnrichedDataset instance or None if not found
+        """
+        return (
+            self.session.query(EnrichedDataset)
+            .filter_by(name=name)
+            .first()
+        )
+
+    def get_by_enriched_table_name(self, enriched_table_name: str) -> Optional[EnrichedDataset]:
+        """
+        Get enriched dataset by enriched table name.
+        
+        Args:
+            enriched_table_name: Enriched table name
+            
+        Returns:
+            EnrichedDataset instance or None if not found
+        """
+        return (
+            self.session.query(EnrichedDataset)
+            .filter_by(enriched_table_name=enriched_table_name)
+            .first()
+        )
+
+    def get_by_source_dataset(self, source_dataset_id: int) -> list[EnrichedDataset]:
+        """
+        Get all enriched datasets for a source dataset.
+        
+        Args:
+            source_dataset_id: Source dataset ID
+            
+        Returns:
+            List of EnrichedDataset instances
+        """
+        return (
+            self.session.query(EnrichedDataset)
+            .filter_by(source_dataset_id=source_dataset_id)
+            .order_by(EnrichedDataset.created_at.desc())
+            .all()
+        )
+
+    def get_all(self) -> list[EnrichedDataset]:
+        """
+        Get all enriched datasets, ordered by creation date (newest first).
+        
+        Returns:
+            List of all EnrichedDataset instances
+        """
+        return (
+            self.session.query(EnrichedDataset)
+            .order_by(EnrichedDataset.created_at.desc())
+            .all()
+        )
+
+    def update(self, enriched_dataset: EnrichedDataset) -> EnrichedDataset:
+        """
+        Update enriched dataset.
+        
+        Args:
+            enriched_dataset: EnrichedDataset instance to update
+            
+        Returns:
+            Updated EnrichedDataset instance
+            
+        Raises:
+            ValidationError: If unique constraint violation
+            DatabaseError: If update fails
+        """
+        try:
+            self.session.commit()
+            self.session.refresh(enriched_dataset)
+            logger.debug(f"Updated enriched dataset: {enriched_dataset.name}")
+            return enriched_dataset
+        except IntegrityError as e:
+            self.session.rollback()
+            context = {
+                "name": "Enriched dataset name",
+                "enriched_table_name": "Enriched table name",
+                "source_dataset_id": "Source dataset ID",
+            }
+            raise handle_integrity_error(e, context) from e
+        except Exception as e:
+            self.session.rollback()
+            logger.error(f"Failed to update enriched dataset: {e}", exc_info=True)
+            raise DatabaseError(
+                f"Failed to update enriched dataset: {e}", operation="update_enriched_dataset"
+            ) from e
+
+    def delete(self, enriched_dataset_id: int) -> None:
+        """
+        Delete enriched dataset by ID.
+        
+        Args:
+            enriched_dataset_id: Enriched dataset ID
+            
+        Raises:
+            ValidationError: If enriched dataset not found
+            DatabaseError: If deletion fails
+        """
+        enriched_dataset = self.get_by_id(enriched_dataset_id)
+        if not enriched_dataset:
+            raise ValidationError(
+                f"Enriched dataset with ID {enriched_dataset_id} not found",
+                field="enriched_dataset_id",
+                value=enriched_dataset_id,
+            )
+
+        try:
+            self.session.delete(enriched_dataset)
+            self.session.commit()
+            logger.debug(f"Deleted enriched dataset: {enriched_dataset_id}")
+        except Exception as e:
+            self.session.rollback()
+            logger.error(f"Failed to delete enriched dataset: {e}", exc_info=True)
+            raise DatabaseError(
+                f"Failed to delete enriched dataset: {e}", operation="delete_enriched_dataset"
             ) from e
 

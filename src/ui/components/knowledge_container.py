@@ -129,10 +129,12 @@ def render_data_view_section(
     try:
         # Load data from Knowledge Table
         # Note: We need to query the actual table, not use load_dataset_dataframe
-        query = f"SELECT * FROM {knowledge_table.table_name} ORDER BY created_at DESC LIMIT 10000"
+        from src.utils.validation import quote_identifier
         from sqlalchemy import text
+        quoted_table = quote_identifier(knowledge_table.table_name)
+        query = text(f"SELECT * FROM {quoted_table} ORDER BY created_at DESC LIMIT 10000")
         
-        result = session.execute(text(query))
+        result = session.execute(query)
         rows = result.fetchall()
         
         if rows:
@@ -141,6 +143,9 @@ def render_data_view_section(
             
             # Hide image columns by default for performance
             # Extract image columns from columns_config
+            if not knowledge_table.columns_config:
+                st.error(f"Knowledge Table '{knowledge_table.name}' has invalid columns_config")
+                return
             image_cols = [
                 col_name
                 for col_name, col_config in knowledge_table.columns_config.items()

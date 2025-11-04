@@ -44,7 +44,7 @@ class DatasetConfig(Base):
         JSON, nullable=False
     )  # {"column_name": {"type": "TEXT", "is_image": False}}
     duplicate_filter_column = Column(String(255), nullable=True)
-    image_columns = Column(JSON, nullable=False, default=list)  # List of column names
+    image_columns = Column(JSON, nullable=False, default=lambda: [])  # List of column names
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
@@ -160,7 +160,7 @@ class EnrichedDataset(Base):
     enrichment_config = Column(
         JSON, nullable=False
     )  # {"column_name": "enrichment_function_name"}
-    columns_added = Column(JSON, nullable=False, default=list)  # List of enriched column names
+    columns_added = Column(JSON, nullable=False, default=lambda: [])  # List of enriched column names
     last_sync_date = Column(DateTime, nullable=True)  # Last time enriched table was synced
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(

@@ -16,6 +16,7 @@ from src.database.repository import KnowledgeTableRepository
 from src.services.knowledge_service import standardize_key_value
 from src.utils.errors import ValidationError
 from src.utils.logging_config import get_logger
+from src.utils.validation import quote_identifier, sanitize_column_name
 
 logger = get_logger(__name__)
 
@@ -102,8 +103,10 @@ def search_knowledge_base(
     for kt in all_knowledge_tables:
         try:
             # Use indexed Key_ID column for fast lookup
+            quoted_table = quote_identifier(kt.table_name)
+            quoted_key_id = quote_identifier("Key_ID")
             count_query = text(
-                f"SELECT COUNT(*) FROM {kt.table_name} WHERE Key_ID = :key_id"
+                f"SELECT COUNT(*) FROM {quoted_table} WHERE {quoted_key_id} = :key_id"
             )
             result = session.execute(count_query, {"key_id": standardized_key_id})
             row_count = result.scalar() or 0
@@ -146,14 +149,20 @@ def search_knowledge_base(
         ]
         
         for col_name in matching_columns:
-            enriched_col_name = f"{col_name}_enriched_{data_type}"
+            # Sanitize column name to match enriched column naming convention
+            # (enriched columns are created with sanitized names)
+            sanitized_col_name = sanitize_column_name(col_name)
+            enriched_col_name = f"{sanitized_col_name}_enriched_{data_type}"
             
-            if enriched_col_name in enriched_dataset.columns_added:
+            if enriched_dataset.columns_added and enriched_col_name in enriched_dataset.columns_added:
                 try:
                     # Use indexed enriched column for fast lookup
+                    # Note: enriched_col_name is already sanitized (no spaces), but quote for safety
+                    quoted_table = quote_identifier(enriched_dataset.enriched_table_name)
+                    quoted_col = quote_identifier(enriched_col_name)
                     count_query = text(
-                        f"SELECT COUNT(*) FROM {enriched_dataset.enriched_table_name} "
-                        f"WHERE {enriched_col_name} = :key_id"
+                        f"SELECT COUNT(*) FROM {quoted_table} "
+                        f"WHERE {quoted_col} = :key_id"
                     )
                     result = session.execute(count_query, {"key_id": standardized_key_id})
                     row_count = result.scalar() or 0
@@ -229,9 +238,11 @@ def get_knowledge_table_data_for_key(
     
     try:
         # Fast lookup using Key_ID index
+        quoted_table = quote_identifier(knowledge_table.table_name)
+        quoted_key_id = quote_identifier("Key_ID")
         query = text(
-            f"SELECT * FROM {knowledge_table.table_name} "
-            f"WHERE Key_ID = :key_id "
+            f"SELECT * FROM {quoted_table} "
+            f"WHERE {quoted_key_id} = :key_id "
             f"LIMIT :limit"
         )
         result = session.execute(
@@ -292,6 +303,12 @@ def get_enriched_dataset_data_for_key(
             value=enriched_dataset_id,
         )
     
+    if not enriched_dataset.columns_added:
+        raise ValidationError(
+            f"Enriched dataset {enriched_dataset_id} has invalid columns_added (None or empty)",
+            field="columns_added",
+            value=enriched_dataset_id,
+        )
     if enriched_column not in enriched_dataset.columns_added:
         raise ValidationError(
             f"Enriched column '{enriched_column}' not found in dataset {enriched_dataset_id}",
@@ -301,9 +318,11 @@ def get_enriched_dataset_data_for_key(
     
     try:
         # Fast lookup using enriched column index
+        quoted_table = quote_identifier(enriched_dataset.enriched_table_name)
+        quoted_col = quote_identifier(enriched_column)
         query = text(
-            f"SELECT * FROM {enriched_dataset.enriched_table_name} "
-            f"WHERE {enriched_column} = :key_id "
+            f"SELECT * FROM {quoted_table} "
+            f"WHERE {quoted_col} = :key_id "
             f"LIMIT :limit"
         )
         result = session.execute(

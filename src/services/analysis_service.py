@@ -18,6 +18,7 @@ from src.services.dataframe_service import load_dataset_dataframe
 from src.services.export_service import filter_by_date_range
 from src.utils.errors import DatabaseError, ValidationError
 from src.utils.logging_config import get_logger
+from src.utils.validation import validate_file_path, validate_foreign_key, validate_string_length
 
 logger = get_logger(__name__)
 
@@ -445,6 +446,11 @@ def create_analysis(
         ValidationError: If configuration is invalid
         DatabaseError: If creation fails
     """
+    # Validate inputs
+    name = validate_string_length(name, 255, "Analysis name")
+    if date_column:
+        date_column = validate_string_length(date_column, 255, "date_column")
+    
     # Validate operation type
     valid_operations = ["groupby", "pivot", "merge", "join", "concat", "apply", "map"]
     if operation_type not in valid_operations:
@@ -454,15 +460,28 @@ def create_analysis(
             value=operation_type,
         )
     
-    # Get source dataset
+    # Validate foreign keys
+    validate_foreign_key(session, DatasetConfig, source_dataset_id, "source_dataset_id")
+    if secondary_dataset_id is not None:
+        validate_foreign_key(session, DatasetConfig, secondary_dataset_id, "secondary_dataset_id")
+    
+    # Get source dataset (now guaranteed to exist)
     dataset_repo = DatasetRepository(session)
     source_dataset = dataset_repo.get_by_id(source_dataset_id)
-    if not source_dataset:
-        raise ValidationError(
-            f"Source dataset with ID {source_dataset_id} not found",
-            field="source_dataset_id",
-            value=source_dataset_id,
-        )
+    
+    # Validate date_column exists in source dataset if provided
+    if date_column:
+        if not source_dataset.columns_config or date_column not in source_dataset.columns_config:
+            raise ValidationError(
+                f"Date column '{date_column}' not found in source dataset '{source_dataset.name}'",
+                field="date_column",
+                value=date_column,
+            )
+    
+    # Validate operation_config structure based on operation_type
+    source_columns = list(source_dataset.columns_config.keys()) if source_dataset.columns_config else []
+    from src.utils.validation import validate_operation_config
+    operation_config = validate_operation_config(operation_type, operation_config, source_dataset_columns=source_columns)
     
     # Load and filter source data
     df_source = load_filtered_dataset(
@@ -576,7 +595,11 @@ def create_analysis(
     
     # Now save result to parquet with actual ID
     result_file_path = save_analysis_result(result_df, analysis.id)
-    analysis.result_file_path = str(result_file_path)
+    result_file_path_str = str(result_file_path)
+    
+    # Validate file path before storing
+    result_file_path_str = validate_file_path(result_file_path_str, max_length=500, check_exists=True, field_name="result_file_path")
+    analysis.result_file_path = result_file_path_str
     
     # Update with actual file path
     analysis = repo.update(analysis)
@@ -629,6 +652,14 @@ def refresh_analysis(session: Session, analysis_id: int) -> DataAnalysis:
         analysis.date_range_end,
         analysis.date_column,
     )
+    
+    # Ensure operation_config exists
+    if not analysis.operation_config:
+        raise ValidationError(
+            f"Analysis {analysis.id} has invalid operation_config (None or empty)",
+            field="operation_config",
+            value=analysis.id,
+        )
     
     # Re-execute operation
     result_df = None
@@ -699,7 +730,11 @@ def refresh_analysis(session: Session, analysis_id: int) -> DataAnalysis:
         old_path.unlink()
     
     result_file_path = save_analysis_result(result_df, analysis.id)
-    analysis.result_file_path = str(result_file_path)
+    result_file_path_str = str(result_file_path)
+    
+    # Validate file path before storing
+    result_file_path_str = validate_file_path(result_file_path_str, max_length=500, check_exists=True, field_name="result_file_path")
+    analysis.result_file_path = result_file_path_str
     analysis.last_refreshed_at = datetime.now()
     analysis.source_updated_at = source_dataset.updated_at
     
