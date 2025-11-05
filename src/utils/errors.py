@@ -131,6 +131,16 @@ class FileProcessingError(OperationalError):
         super().__init__(message, code="FILE_PROCESSING_ERROR", details=details, **kwargs)
 
 
+class DirectoryTreeError(OperationalError):
+    """Error generating directory tree (invalid path, permission denied, etc.)."""
+
+    def __init__(self, message: str, path: Optional[str] = None, **kwargs: Any):
+        details = kwargs.pop("details", {})
+        if path:
+            details["path"] = path
+        super().__init__(message, code="DIRECTORY_TREE_ERROR", details=details, **kwargs)
+
+
 # Programmer Errors (crash with logging)
 
 
