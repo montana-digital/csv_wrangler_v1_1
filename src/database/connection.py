@@ -331,7 +331,28 @@ def migrate_database() -> None:
                 # Don't raise - allow migration to continue even if this fails
                 # The indexes are for performance, not critical for functionality
             
-            # Migration 7: Add indexes for enriched_dataset table
+            # Migration 7: Add theme_mode and wide_mode columns to user_profile table
+            result = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='user_profile'")
+            )
+            if result.fetchone():
+                # Check existing columns
+                result = conn.execute(text("PRAGMA table_info(user_profile)"))
+                columns = [row[1] for row in result.fetchall()]
+                
+                if "theme_mode" not in columns:
+                    logger.info("Migration 7: Adding theme_mode column to user_profile table")
+                    conn.execute(text("ALTER TABLE user_profile ADD COLUMN theme_mode VARCHAR(20) DEFAULT 'dark'"))
+                    conn.commit()
+                    logger.info("Migration 7: Successfully added theme_mode column")
+                
+                if "wide_mode" not in columns:
+                    logger.info("Migration 7: Adding wide_mode column to user_profile table")
+                    conn.execute(text("ALTER TABLE user_profile ADD COLUMN wide_mode BOOLEAN DEFAULT 1"))
+                    conn.commit()
+                    logger.info("Migration 7: Successfully added wide_mode column")
+            
+            # Migration 8: Add indexes for enriched_dataset table
             try:
                 result = conn.execute(
                     text("SELECT name FROM sqlite_master WHERE type='table' AND name='enriched_dataset'")
@@ -342,24 +363,25 @@ def migrate_database() -> None:
                         text("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_enriched_dataset_source_dataset_id'")
                     )
                     if not result.fetchone():
-                        logger.info("Creating index on enriched_dataset.source_dataset_id")
+                        logger.info("Migration 8: Creating index on enriched_dataset.source_dataset_id")
                         conn.execute(
                             text("CREATE INDEX IF NOT EXISTS idx_enriched_dataset_source_dataset_id ON enriched_dataset(source_dataset_id)")
                         )
-                        logger.debug("Created index idx_enriched_dataset_source_dataset_id")
+                        conn.commit()
+                        logger.info("Migration 8: Created index idx_enriched_dataset_source_dataset_id")
                     else:
-                        logger.debug("Index idx_enriched_dataset_source_dataset_id already exists")
+                        logger.debug("Migration 8: Index idx_enriched_dataset_source_dataset_id already exists")
                     
                     # Note: enriched_table_name already has a unique constraint which acts as an index
                     # but we can still create an explicit index if needed for clarity
                     # For now, we skip it since unique constraints create indexes automatically
                     
                     conn.commit()
-                    logger.info("Migration 7: Added indexes for enriched_dataset table")
+                    logger.info("Migration 8: Added indexes for enriched_dataset table")
                 else:
-                    logger.debug("Migration 7: enriched_dataset table does not exist, skipping index creation")
+                    logger.debug("Migration 8: enriched_dataset table does not exist, skipping index creation")
             except Exception as e:
-                logger.warning(f"Migration 7 (add enriched_dataset indexes) failed: {e}. Continuing...")
+                logger.warning(f"Migration 8 (add enriched_dataset indexes) failed: {e}. Continuing...")
                     
     except Exception as e:
         logger.error(f"Failed to migrate database: {e}", exc_info=True)

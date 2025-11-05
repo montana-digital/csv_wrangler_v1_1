@@ -117,6 +117,8 @@ class UserProfile(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
     logo_path = Column(String(500), nullable=True)  # Path to uploaded logo file
+    theme_mode = Column(String(20), nullable=True, default="dark")  # "dark" or "light"
+    wide_mode = Column(Boolean, nullable=True, default=True)  # Always use wide layout
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
@@ -131,6 +133,8 @@ class UserProfile(Base):
             "id": self.id,
             "name": self.name,
             "logo_path": self.logo_path,
+            "theme_mode": self.theme_mode,
+            "wide_mode": self.wide_mode,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

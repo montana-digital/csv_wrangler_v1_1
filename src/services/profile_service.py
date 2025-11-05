@@ -43,8 +43,12 @@ def create_user_profile(
         logger.warning(f"Profile already exists: {existing.name}")
         return existing
 
-    # Create new profile
-    profile = UserProfile(name=name.strip())
+    # Create new profile with default preferences (dark mode, wide mode)
+    profile = UserProfile(
+        name=name.strip(),
+        theme_mode="dark",  # Default to dark mode
+        wide_mode=True,     # Default to wide mode
+    )
     created = repo.create(profile)
 
     logger.info(f"Created user profile: {created.name}")

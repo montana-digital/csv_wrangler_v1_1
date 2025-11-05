@@ -1,5 +1,6 @@
 # Streamlit Configuration for CSV Wrangler
 # This file ensures consistent behavior across installations
+# User preferences are stored in database and applied via preference_manager
 
 [server]
 # Port will be set via command line, but default here
@@ -18,9 +19,10 @@ gatherUsageStats = false
 serverAddress = "localhost"
 
 [theme]
-# Use default theme (can be customized later)
+# Default theme - user preferences override this via database
+# Dark mode is the default preference
 primaryColor = "#FF4B4B"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#262730"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#FAFAFA"
 font = "sans serif"

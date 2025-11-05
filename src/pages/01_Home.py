@@ -70,10 +70,25 @@ with get_session() as session:
     st.markdown(f"**Current Version:** `{current_version}`")
     st.markdown("---")
     
+    # Filter versions to only show 1.0.3 and below
+    def version_compare(version_str):
+        """Compare version strings numerically."""
+        try:
+            parts = version_str.split('.')
+            return tuple(int(part) for part in parts)
+        except (ValueError, AttributeError):
+            return (0, 0, 0)
+    
+    current_version_tuple = version_compare(current_version)
+    filtered_history = {
+        v: info for v, info in version_history.items()
+        if version_compare(v) <= current_version_tuple
+    }
+    
     # Display version history (most recent first)
     # Sort versions by date (descending)
     sorted_versions = sorted(
-        version_history.items(),
+        filtered_history.items(),
         key=lambda x: x[1]["date"],
         reverse=True
     )

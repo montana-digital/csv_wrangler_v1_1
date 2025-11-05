@@ -29,20 +29,42 @@ try:
     init_database()
 except Exception as e:
     logger.error(f"Failed to initialize database: {e}", exc_info=True)
-    st.error("Failed to initialize database. Please check logs.")
-    st.stop()
+    # Can't use st.error() before st.set_page_config(), so just stop
+    import sys
+    print(f"ERROR: Failed to initialize database: {e}", file=sys.stderr)
+    sys.exit(1)
 
-# Page configuration - MUST be first Streamlit command
-st.set_page_config(
-    page_title="CSV Wrangler",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# Check if app is initialized (this needs to happen before pages load)
+# Check if app is initialized and apply user preferences
+# This must happen before st.set_page_config() which must be the first Streamlit command
 from src.database.connection import get_session
-from src.services.profile_service import is_app_initialized, get_current_profile
+from src.services.profile_service import is_app_initialized
+
+# Get user preferences and apply to page config
+# MUST be first Streamlit command, so we need to check initialization first
+try:
+    with get_session() as session:
+        if is_app_initialized(session):
+            from src.utils.preference_manager import apply_user_preferences
+            apply_user_preferences(session)
+        else:
+            # Default config for initialization screen
+            st.set_page_config(
+                page_title="CSV Wrangler",
+                page_icon="📊",
+                layout="wide",
+                initial_sidebar_state="expanded",
+            )
+except Exception as e:
+    # Fallback to default config if preference loading fails
+    logger.warning(f"Failed to load user preferences: {e}")
+    st.set_page_config(
+        page_title="CSV Wrangler",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+from src.services.profile_service import get_current_profile
 
 with get_session() as session:
     if not is_app_initialized(session):
