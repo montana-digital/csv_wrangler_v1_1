@@ -71,12 +71,10 @@ def render_enriched_tracker(
                 if on_sync:
                     if st.button("🔄 Sync Now", key=f"sync_{enriched.id}"):
                         with st.spinner("Syncing enriched dataset..."):
-                            try:
-                                on_sync(enriched.id)
-                                st.success("✅ Sync completed!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Sync failed: {e}")
+                            # Handler function handles errors and shows messages
+                            on_sync(enriched.id)
+                            # Rerun to refresh the UI
+                            st.rerun()
                 
                 # Delete button
                 if on_delete:

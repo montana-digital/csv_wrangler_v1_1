@@ -127,7 +127,8 @@ class TestEnrichmentWorkflowIntegration:
         )
         
         # Add new data
-        # Note: upload_csv_to_dataset automatically syncs enriched datasets (v1.1 feature)
+        # Note: upload_csv_to_dataset does NOT automatically sync enriched datasets
+        # Sync must be manually triggered by the user
         csv_file2 = tmp_path / "source2.csv"
         csv_file2.write_text("email\njane@test.com\nbob@test.com", encoding="utf-8")
         upload_csv_to_dataset(
@@ -137,24 +138,24 @@ class TestEnrichmentWorkflowIntegration:
             filename="source2.csv"
         )
         
-        # Verify automatic sync happened during upload
-        # The enriched dataset should already have all 3 rows (1 initial + 2 auto-synced)
+        # Verify NO automatic sync happened during upload
+        # The enriched dataset should still have only 1 row (initial data)
         result = test_session.execute(
             text(f"SELECT COUNT(*) FROM {enriched.enriched_table_name}")
         )
         total_rows = result.scalar()
-        assert total_rows == 3, f"Expected 3 rows after auto-sync, got {total_rows}"
+        assert total_rows == 1, f"Expected 1 row after upload (no auto-sync), got {total_rows}"
         
-        # Manual sync should find 0 new rows (already synced automatically)
+        # Manual sync should find 2 new rows
         rows_synced = sync_enriched_dataset(test_session, enriched.id)
-        assert rows_synced == 0, "No new rows should be found after automatic sync"
+        assert rows_synced == 2, f"Expected 2 new rows to be synced, got {rows_synced}"
         
-        # Verify total rows unchanged
+        # Verify total rows after sync
         result = test_session.execute(
             text(f"SELECT COUNT(*) FROM {enriched.enriched_table_name}")
         )
         total_rows_after = result.scalar()
-        assert total_rows_after == 3  # Still 3 rows
+        assert total_rows_after == 3  # 1 original + 2 new = 3 total rows
 
     def test_multiple_enrichments_on_same_dataset(self, test_session, tmp_path):
         """Test creating multiple enriched datasets from same source."""
@@ -208,8 +209,8 @@ class TestEnrichmentWorkflowIntegration:
         assert result1.scalar() == 1
         assert result2.scalar() == 1
 
-    def test_sync_all_enriched_datasets_auto_updates(self, test_session, tmp_path):
-        """Test that sync_all updates all enriched datasets when source changes."""
+    def test_sync_all_enriched_datasets_manual_sync(self, test_session, tmp_path):
+        """Test that sync_all manually syncs all enriched datasets when source changes."""
         columns_config = {"phone": {"type": "TEXT", "is_image": False}}
         dataset = initialize_dataset(
             session=test_session,
@@ -252,23 +253,34 @@ class TestEnrichmentWorkflowIntegration:
             filename="source2.csv"
         )
         
-        # Verify automatic sync happened - both enriched datasets should have 2 rows now
+        # Verify NO automatic sync happened - both enriched datasets should still have 1 row
         result1 = test_session.execute(
             text(f"SELECT COUNT(*) FROM {enriched1.enriched_table_name}")
         )
         result2 = test_session.execute(
             text(f"SELECT COUNT(*) FROM {enriched2.enriched_table_name}")
         )
-        assert result1.scalar() == 2, "Enriched dataset 1 should have 2 rows after auto-sync"
-        assert result2.scalar() == 2, "Enriched dataset 2 should have 2 rows after auto-sync"
+        assert result1.scalar() == 1, "Enriched dataset 1 should still have 1 row (no auto-sync)"
+        assert result2.scalar() == 1, "Enriched dataset 2 should still have 1 row (no auto-sync)"
         
-        # Manual sync should find 0 new rows (already synced automatically)
+        # Manual sync should find 1 new row for each enriched dataset
         from src.services.enrichment_service import sync_all_enriched_datasets_for_source
         results = sync_all_enriched_datasets_for_source(test_session, dataset.id)
         
-        # Both enriched datasets should be in results but with 0 rows synced
+        # Both enriched datasets should be in results with 1 row synced each
         assert len(results) == 2
-        assert all(rows_synced == 0 for rows_synced in results.values()), "No new rows should be found after automatic sync"
+        assert results[str(enriched1.id)] == 1, f"Enriched dataset 1 should have 1 row synced, got {results[str(enriched1.id)]}"
+        assert results[str(enriched2.id)] == 1, f"Enriched dataset 2 should have 1 row synced, got {results[str(enriched2.id)]}"
+        
+        # Verify both enriched datasets now have 2 rows after sync
+        result1 = test_session.execute(
+            text(f"SELECT COUNT(*) FROM {enriched1.enriched_table_name}")
+        )
+        result2 = test_session.execute(
+            text(f"SELECT COUNT(*) FROM {enriched2.enriched_table_name}")
+        )
+        assert result1.scalar() == 2, "Enriched dataset 1 should have 2 rows after sync"
+        assert result2.scalar() == 2, "Enriched dataset 2 should have 2 rows after sync"
 
     def test_delete_enriched_dataset_removes_table(self, test_session, tmp_path):
         """Test that deleting enriched dataset removes the table."""

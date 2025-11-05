@@ -399,47 +399,6 @@ def upload_csv_to_dataset(
             # Don't fail the upload if cache invalidation fails
             logger.warning(f"Failed to invalidate cache after upload: {cache_error}")
 
-        # Trigger enriched dataset sync (v1.1 feature)
-        # Pre-check: Only attempt sync if enriched datasets exist
-        from src.database.models import EnrichedDataset
-        enriched_datasets = (
-            session.query(EnrichedDataset)
-            .filter_by(source_dataset_id=dataset_id)
-            .all()
-        )
-
-        if enriched_datasets:
-            try:
-                from src.services.enrichment_service import sync_all_enriched_datasets_for_source
-                sync_results = sync_all_enriched_datasets_for_source(session, dataset_id)
-                if sync_results:
-                    successful_syncs = sum(1 for v in sync_results.values() if v >= 0)
-                    if successful_syncs > 0:
-                        logger.info(
-                            f"Synced {successful_syncs} enriched datasets for source dataset {dataset_id}"
-                        )
-            except ValidationError as sync_error:
-                # Expected: missing tables, orphaned datasets, etc.
-                logger.warning(
-                    f"Enriched dataset sync skipped (validation error): {sync_error}",
-                    exc_info=False,  # Don't log stack trace for expected errors
-                )
-            except DatabaseError as sync_error:
-                # Database issues during sync - log but don't fail upload
-                logger.warning(
-                    f"Enriched dataset sync failed (database error): {sync_error}",
-                    exc_info=True,
-                )
-            except Exception as sync_error:
-                # Unexpected errors - log with full details
-                logger.error(
-                    f"Unexpected error during enriched dataset sync: {sync_error}",
-                    exc_info=True,
-                )
-            # Never re-raise - sync failures shouldn't affect upload success
-        else:
-            logger.debug(f"No enriched datasets to sync for dataset {dataset_id}")
-
         return upload_log
 
     except Exception as e:

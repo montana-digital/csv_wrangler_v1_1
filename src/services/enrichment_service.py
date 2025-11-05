@@ -372,6 +372,28 @@ def sync_enriched_dataset(
             # Let context manager commit
             return 0
         
+        # Ensure enrichment_config exists
+        if not enriched_dataset.enrichment_config:
+            raise ValidationError(
+                f"Enriched dataset {enriched_dataset_id} has invalid enrichment_config (None or empty)",
+                field="enrichment_config",
+                value=enriched_dataset_id,
+            )
+        
+        # Validate that all columns in enrichment_config exist in the DataFrame
+        missing_columns = [
+            col_name for col_name in enriched_dataset.enrichment_config.keys()
+            if col_name not in new_rows_df.columns
+        ]
+        if missing_columns:
+            raise ValidationError(
+                f"Enriched dataset '{enriched_dataset.name}' references columns that don't exist "
+                f"in the source table: {', '.join(missing_columns)}. "
+                f"The source dataset structure may have changed. Please recreate the enriched dataset.",
+                field="enrichment_config",
+                value=missing_columns,
+            )
+        
         # Insert new rows into enriched table (without enriched columns yet)
         insert_dataframe_to_table(
             session,
@@ -381,14 +403,6 @@ def sync_enriched_dataset(
         
         # Apply enrichment functions to new rows
         rows_synced = len(new_rows_df)
-        
-        # Ensure enrichment_config exists
-        if not enriched_dataset.enrichment_config:
-            raise ValidationError(
-                f"Enriched dataset {enriched_dataset_id} has invalid enrichment_config (None or empty)",
-                field="enrichment_config",
-                value=enriched_dataset_id,
-            )
         
         for col_name, function_name in enriched_dataset.enrichment_config.items():
             # Sanitize source column name to match enriched column naming convention

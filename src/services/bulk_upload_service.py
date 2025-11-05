@@ -206,20 +206,6 @@ def upload_file_to_dataset(
 
         logger.info(f"Uploaded {total_rows} rows from {filename} (Pickle) to dataset {dataset_id}")
 
-        # Trigger enriched dataset sync
-        try:
-            from src.services.enrichment_service import sync_all_enriched_datasets_for_source
-            sync_results = sync_all_enriched_datasets_for_source(session, dataset_id)
-            if sync_results:
-                logger.info(
-                    f"Synced {len(sync_results)} enriched datasets for source dataset {dataset_id}"
-                )
-        except Exception as sync_error:
-            logger.warning(
-                f"Failed to sync enriched datasets after upload: {sync_error}",
-                exc_info=True,
-            )
-
         return total_rows
 
 

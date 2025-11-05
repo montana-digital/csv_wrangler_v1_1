@@ -16,9 +16,13 @@ from src.services.enrichment_service import (
     get_enriched_datasets,
     sync_enriched_dataset,
 )
+from src.utils.errors import ValidationError
+from src.utils.logging_config import get_logger
 from src.ui.components.enrichment_config import render_enrichment_config_ui
 from src.ui.components.enriched_tracker import render_enriched_tracker
 from src.ui.components.sidebar import render_sidebar
+
+logger = get_logger(__name__)
 
 # Render uniform sidebar
 render_sidebar()
@@ -115,10 +119,16 @@ with get_session() as session:
             def handle_sync(enriched_id: int):
                 """Handle sync action."""
                 try:
-                    sync_enriched_dataset(session, enriched_id)
+                    rows_synced = sync_enriched_dataset(session, enriched_id)
+                    if rows_synced > 0:
+                        st.success(f"✅ Sync completed! {rows_synced} new rows synced.")
+                    else:
+                        st.info("✅ Sync completed! No new rows to sync.")
+                except ValidationError as e:
+                    st.error(f"⚠️ Sync failed: {e}")
                 except Exception as e:
-                    st.error(f"Sync failed: {e}")
-                    raise
+                    st.error(f"❌ Sync failed: {e}")
+                    logger.error(f"Unexpected sync error: {e}", exc_info=True)
             
             def handle_delete(enriched_id: int):
                 """Handle delete action."""
