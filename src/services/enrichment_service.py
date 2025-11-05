@@ -33,6 +33,7 @@ from src.utils.validation import (
     validate_foreign_key,
     validate_string_length,
 )
+from src.utils.cache_manager import invalidate_enriched_dataset_cache
 
 logger = get_logger(__name__)
 
@@ -430,6 +431,13 @@ def sync_enriched_dataset(
             f"Synced {rows_synced} new rows to enriched dataset {enriched_dataset_id}"
         )
         
+        # Invalidate cache after successful sync
+        try:
+            invalidate_enriched_dataset_cache(enriched_dataset_id)
+        except Exception as cache_error:
+            # Don't fail sync if cache invalidation fails
+            logger.warning(f"Failed to invalidate cache after sync: {cache_error}")
+        
         return rows_synced
         
     except Exception as e:
@@ -467,6 +475,7 @@ def sync_all_enriched_datasets_for_source(
         try:
             rows_synced = sync_enriched_dataset(session, enriched_dataset.id)
             results[str(enriched_dataset.id)] = rows_synced
+            # Cache invalidation is handled inside sync_enriched_dataset
         except Exception as e:
             logger.error(
                 f"Failed to sync enriched dataset {enriched_dataset.id}: {e}",

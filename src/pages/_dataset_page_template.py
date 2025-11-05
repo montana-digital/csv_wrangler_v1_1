@@ -143,25 +143,52 @@ def render_dataset_page(slot_number: int) -> None:
 
             st.markdown("---")
 
-            # Data viewer
+            # Data viewer - lazy load only when requested
             try:
                 stats = get_dataset_statistics(session, dataset.id)
                 if stats["total_rows"] > 0:
-                    # Load recent data (exclude image columns for performance)
-                    from src.services.dataframe_service import load_dataset_dataframe
-                    import pandas as pd
+                    # Check if user wants to load data
+                    data_viewer_key = f"show_data_viewer_{dataset.id}"
+                    if data_viewer_key not in st.session_state:
+                        st.session_state[data_viewer_key] = False
+                    
+                    # Button to toggle data viewer
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        if st.button(
+                            "📊 Load Data Viewer" if not st.session_state[data_viewer_key] else "📊 Hide Data Viewer",
+                            key=f"toggle_data_viewer_{dataset.id}",
+                            type="secondary" if st.session_state[data_viewer_key] else "primary",
+                        ):
+                            st.session_state[data_viewer_key] = not st.session_state[data_viewer_key]
+                            st.rerun()
+                    
+                    with col2:
+                        if st.session_state[data_viewer_key]:
+                            st.caption(f"Showing data viewer for {stats['total_rows']:,} rows")
+                        else:
+                            st.caption("Click 'Load Data Viewer' to view dataset data")
+                    
+                    # Load and display data only if requested
+                    if st.session_state[data_viewer_key]:
+                        # Load recent data (exclude image columns for performance)
+                        from src.services.dataframe_service import load_dataset_dataframe
+                        import pandas as pd
 
-                    df = load_dataset_dataframe(
-                        session=session,
-                        dataset_id=dataset.id,
-                        limit=10000,
-                        offset=0,
-                        include_image_columns=False,  # Exclude images for performance
-                        order_by_recent=True,
-                    )
+                        with st.spinner("Loading data..."):
+                            df = load_dataset_dataframe(
+                                session=session,
+                                dataset_id=dataset.id,
+                                limit=10000,
+                                offset=0,
+                                include_image_columns=False,  # Exclude images for performance
+                                order_by_recent=True,
+                            )
 
-                    if not df.empty:
-                        render_data_viewer(df)
+                        if not df.empty:
+                            render_data_viewer(df)
+                        else:
+                            st.info("No data loaded. Try adjusting the limit or offset.")
             except Exception as e:
                 handle_exception(e, "DATABASE_ERROR", show_troubleshooting=True)
 

@@ -49,16 +49,54 @@ def render_image_table_viewer(
     cache_key = f"image_table_data_{table_type}_{table_id}"
     selection_key = f"image_selected_row_{table_type}_{table_id}"
     
+    # Configuration for data loading
+    default_limit = 10000  # Reasonable default instead of 1M
+    limit_key = f"image_table_limit_{table_type}_{table_id}"
+    
+    # Initialize limit in session state
+    if limit_key not in st.session_state:
+        st.session_state[limit_key] = default_limit
+    
+    # Allow user to configure limit
+    col_limit, col_load = st.columns([2, 1])
+    with col_limit:
+        row_limit = st.number_input(
+            "Rows to load",
+            min_value=100,
+            max_value=100000,
+            value=st.session_state[limit_key],
+            step=1000,
+            key=f"limit_input_{table_type}_{table_id}",
+            help="Reduce this value for faster loading with large datasets",
+        )
+        st.session_state[limit_key] = row_limit
+    
+    with col_load:
+        st.write("")  # Spacing
+        load_button = st.button(
+            "🔄 Load Data" if cache_key not in st.session_state else "🔄 Reload Data",
+            key=f"load_data_{table_type}_{table_id}",
+            use_container_width=True,
+        )
+    
+    # Clear cache if reload button clicked or limit changed
+    if load_button or (cache_key in st.session_state and st.session_state.get(f"last_limit_{table_type}_{table_id}", 0) != row_limit):
+        if cache_key in st.session_state:
+            del st.session_state[cache_key]
+        st.session_state[f"last_limit_{table_type}_{table_id}"] = row_limit
+        if load_button:
+            st.rerun()
+    
     # Load data (cached in session state)
     if cache_key not in st.session_state:
-        with st.spinner(f"Loading data from {table_name}..."):
+        with st.spinner(f"Loading {row_limit} rows from {table_name}..."):
             try:
-                # Load all data with image columns
+                # Load data with configurable limit
                 if table_type == "dataset":
                     df = load_dataset_dataframe(
                         session=session,
                         dataset_id=table_id,
-                        limit=1000000,  # Very large limit to get all data
+                        limit=row_limit,  # Use configurable limit
                         offset=0,
                         include_image_columns=True,  # Include images
                         order_by_recent=True,
@@ -67,7 +105,7 @@ def render_image_table_viewer(
                     df = load_enriched_dataset_dataframe(
                         session=session,
                         enriched_dataset_id=table_id,
-                        limit=1000000,  # Very large limit to get all data
+                        limit=row_limit,  # Use configurable limit
                         offset=0,
                         include_image_columns=True,  # Include images
                         order_by_recent=True,
